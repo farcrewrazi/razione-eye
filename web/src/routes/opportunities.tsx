@@ -1,15 +1,17 @@
 /**
- * Opportunities — the pipeline table (docs/01 §6 module 2).
+ * Opportunities — the pipeline table (docs/01 §6 module 2) + board view (T1.5).
  *
- * Filterable (search / status / band) list of opportunities with band badges,
- * mono score readouts, relative timestamps, and a limit-50 windowed footer.
- * Row click → /opportunities/:id detail.
+ * Table/Board segmented control (persisted in localStorage):
+ *   - Table: filterable list, band badges, mono scores, relative timestamps,
+ *     limit-50 windowed footer. Row click → /opportunities/:id.
+ *   - Board: the 9-stage drag & drop pipeline with terminal zone — see
+ *     pipeline.tsx.
  */
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
-import { AlertTriangle, ChevronLeft, ChevronRight, Search } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, ChevronRight, Kanban, Search, Table2 as TableViewIcon } from 'lucide-react'
 import { listOpportunities } from '@/api/provider'
 import type { Opportunity, ScoreBand } from '@/api/types'
 import { JOB_STATUSES, SCORE_BANDS } from '@/api/types'
@@ -17,8 +19,22 @@ import { BandBadge, EmptyState, PageHeader, StatusBadge } from '@/components/com
 import { Button, Card, Input, Select, Skeleton, Table, Td, Th, Thead, Tr } from '@/components/ui'
 import { salaryLabel, scoreColor, timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { PipelineBoard } from './pipeline'
 
 const PAGE_SIZE = 50
+
+/** localStorage key for the Table/Board view preference. */
+const VIEW_PREF_KEY = 'razione-eye:opportunities:view'
+type ViewMode = 'table' | 'board'
+
+function loadViewPref(): ViewMode {
+  try {
+    const raw = localStorage.getItem(VIEW_PREF_KEY)
+    return raw === 'board' ? 'board' : 'table'
+  } catch {
+    return 'table'
+  }
+}
 
 type StatusFilter = string // '' = All
 
@@ -62,10 +78,19 @@ function OpportunityRow({ o, onOpen }: { o: Opportunity; onOpen: (id: string) =>
 
 export function OpportunitiesPage() {
   const navigate = useNavigate()
+  const [view, setView] = useState<ViewMode>(loadViewPref)
   const [q, setQ] = useState('')
   const [status, setStatus] = useState<StatusFilter>('')
   const [band, setBand] = useState<ScoreBand | ''>('')
   const [page, setPage] = useState(0)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_PREF_KEY, view)
+    } catch {
+      // Private mode / storage disabled — preference just won't persist.
+    }
+  }, [view])
 
   // Debounce the search box so typing doesn't thrash the query key.
   const [qInput, setQInput] = useState('')
@@ -101,17 +126,52 @@ export function OpportunitiesPage() {
   const hasNext = (page + 1) * PAGE_SIZE < total
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <PageHeader
         title="Opportunities"
         subtitle="Career pipeline — every discovered role, ranked by match."
         actions={
-          <span className="font-mono text-xs tracking-wider text-[var(--color-muted)] tabular-nums">
-            {isPending ? '…' : `${total} TOTAL`}
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-xs tracking-wider text-[var(--color-muted)] tabular-nums">
+              {isPending ? '…' : `${total} TOTAL`}
+            </span>
+            {/* Table / Board segmented control (persisted) */}
+            <div
+              role="group"
+              aria-label="View mode"
+              className="flex items-center gap-0.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5"
+            >
+              {(
+                [
+                  ['table', 'Table', TableViewIcon],
+                  ['board', 'Board', Kanban],
+                ] as const
+              ).map(([mode, label, Icon]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={view === mode}
+                  onClick={() => setView(mode)}
+                  className={cn(
+                    'inline-flex h-7 items-center gap-1.5 rounded px-2.5 text-xs transition-colors',
+                    view === mode
+                      ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                      : 'text-[var(--color-muted)] hover:bg-white/5 hover:text-[var(--color-text)]',
+                  )}
+                >
+                  <Icon className="size-3.5" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
         }
       />
 
+      {view === 'board' ? (
+        <PipelineBoard />
+      ) : (
+        <>
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-56 flex-1">
@@ -242,6 +302,8 @@ export function OpportunitiesPage() {
             </Button>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   )

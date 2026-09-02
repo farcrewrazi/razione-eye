@@ -31,3 +31,16 @@ CREATE TABLE IF NOT EXISTS edges (
 );
 CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_id, edge_type);
 CREATE INDEX IF NOT EXISTS idx_edges_to   ON edges(to_id, edge_type);
+
+-- Wave 2 (T1.1/T1.2): append-only activity log — status changes, notes, import runs,
+-- agent runs, gate decisions. Feeds the Daily Brief ("what changed") + detail activity logs.
+CREATE TABLE IF NOT EXISTS events (
+  id         TEXT PRIMARY KEY,      -- ULID
+  at         TEXT NOT NULL,          -- ISO-8601 UTC
+  type       TEXT NOT NULL,          -- see EVENT_TYPES in packages/shared
+  node_id    TEXT REFERENCES nodes(id) ON DELETE CASCADE,  -- nullable (e.g. import_run)
+  summary    TEXT NOT NULL,
+  data       TEXT                    -- JSON payload (e.g. full ImportReport on import_run)
+);
+CREATE INDEX IF NOT EXISTS idx_events_node ON events(node_id, at);
+CREATE INDEX IF NOT EXISTS idx_events_type ON events(type, at);

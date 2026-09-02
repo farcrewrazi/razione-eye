@@ -1,0 +1,57 @@
+Agent: Hermes — job discovery transcript, exported 2026-08-24
+
+User: Find me senior backend or full-stack roles around Cyberjaya and KL, Node.js/TypeScript stack, RM12k+. Include anything AI-culture friendly.
+
+Assistant: Searched LinkedIn, JobStreet and a few career pages. Here are the strongest matches:
+
+1. Veloxa Systems — Senior Backend Engineer — Cyberjaya — RM12k-RM16k
+   Source: JobStreet
+   URL: https://www.jobstreet.com.my/job/83412011
+   Stack: Node.js, TypeScript, PostgreSQL
+   Logistics-tech scale-up. Job post mentions pair-programming with AI assistants.
+
+2. TrueNorth Tech — Full Stack Engineer — Kuala Lumpur — RM10k-RM14k
+   Source: LinkedIn
+   URL: https://www.linkedin.com/jobs/view/40201009
+   Stack: React, Node.js, GraphQL
+   Product consultancy with Malaysian + Singaporean clients.
+
+3. Gridline Energy — Software Engineer (IoT Platform) — Cyberjaya — RM11k-RM14k
+   Source: careers_page
+   URL: https://careers.gridline.my/software-engineer-iot
+   Stack: Node.js, MQTT, TimescaleDB
+   Energy monitoring hardware + cloud platform.
+
+User: Any with strong AI culture or agent tooling?
+
+Assistant: Two more stood out on that axis:
+
+4. Cognitiv Labs — AI Platform Engineer — Kuala Lumpur — RM14k-RM18k
+   Source: LinkedIn
+   URL: https://www.linkedin.com/jobs/view/40201010
+   Stack: Python, TypeScript, Kubernetes, LLM tooling
+   They build internal agent platforms for enterprises. Very aligned with your AI orchestration background.
+
+5. Nimbus Cloud Services — Backend Engineer — Cyberjaya — RM11,000 - RM14,000
+   Source: Indeed
+   URL: https://www.indeed.com.my/job/77421004
+   Stack: Node.js, Go, AWS
+   Managed cloud provider; job ad mentions GitHub Copilot for all engineers.
+
+Assistant: I also noticed these two via a recruiter post, slightly outside your usual criteria but worth a look:
+
+6. Zephyr Mobility — Senior Frontend Engineer — Petaling Jaya — RM9k-RM12k
+   Source: LinkedIn
+   URL: https://www.linkedin.com/jobs/view/40201011
+   Stack: React, TypeScript
+   EV fleet dashboards. Frontend-heavy but the team is small.
+
+7. Lexis Document Systems — Software Engineer — Kuala Lumpur
+   Source: Google
+   URL: https://www.indeed.com.my/job/77421005
+   Stack: Node.js, Elasticsearch, PostgreSQL
+   Legal-tech document search. Salary not stated in the ad.
+
+User: Thanks — export these to my career tracker.
+
+Assistant: Done. 7 roles captured. Let me know if you want me to draft outreach for any of them.

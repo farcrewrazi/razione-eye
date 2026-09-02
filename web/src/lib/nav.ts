@@ -32,8 +32,9 @@ export function crumbsFor(pathname: string): string[] {
   const parts = pathname.split('/').filter(Boolean)
   if (parts.length === 0) return []
   const [head, ...rest] = parts
-  const headLabel = NAV_ITEMS.find(
-    (n) => n.to === `/${head}` || (head === 'opportunities' && n.to === '/opportunities'),
-  )?.label ?? head
+  const headLabel =
+    NAV_ITEMS.find(
+      (n) => n.to === `/${head}` || (head === 'opportunities' && n.to === '/opportunities'),
+    )?.label ?? (head === 'profile' ? 'Profile' : head)
   return [headLabel, ...rest.map((p) => (p.length > 8 ? `${p.slice(0, 8)}…` : p))]
 }

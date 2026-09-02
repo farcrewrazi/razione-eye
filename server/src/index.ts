@@ -10,6 +10,7 @@ import { companiesRoute } from './companies.ts';
 import { signalsRoute } from './signals.ts';
 import { tasksRoute } from './tasks.ts';
 import { graphRoute } from './graph.ts';
+import { importRoute } from './import/import-api.ts';
 import { runSeed } from './seed-service.ts';
 import { runBackup } from './backup-service.ts';
 
@@ -47,6 +48,7 @@ export function createApp(db: DatabaseSync): { app: Hono; ctx: AppContext } {
     .route('/signals', signalsRoute)
     .route('/tasks', tasksRoute)
     .route('/graph', graphRoute)
+    .route('/import', importRoute)
     .post('/seed', (c) => c.json(runSeed(ctx)))
     .post('/backup', (c) => c.json(runBackup(ctx.db)));
 

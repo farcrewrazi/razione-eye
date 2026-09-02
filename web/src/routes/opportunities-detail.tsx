@@ -7,28 +7,43 @@
  *   - Matching breakdown — the six sub-scores as labeled bars ("—" when missing).
  *   - Info grid — location, salary, source, url, next action (due highlighted),
  *     contact.
- *   - Notes — both `string` and `{text, created_at}` forms.
+ *   - Notes — both `string` and `{text, created_at}` forms + inline "Add note"
+ *     (POST /notes [W2]) with optimistic append.
+ *   - Activity log — timeline (vertical line, dots) of events from
+ *     GET /opportunities/:id/events [W2], icon per event type, relative
+ *     timestamps, newest first, capped at 20 with "show all" toggle.
  *   - Graph neighbors — edges as chips, COMPANY neighbors link to /companies/:id.
  */
 
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router'
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
+  Bot,
   CalendarClock,
+  Download,
   ExternalLink,
+  FilePlus2,
   Mail,
   MapPin,
+  Plus,
+  Radio,
+  ShieldCheck,
+  StickyNote,
+  Upload,
   UserRound,
   Wallet,
+  type LucideIcon,
 } from 'lucide-react'
-import { getOpportunity, patchOpportunityStatus } from '@/api/provider'
-import type { Matching, Note, OpportunityDetail } from '@/api/types'
+import { appendOpportunityNote, getOpportunity, getOpportunityEvents, patchOpportunityStatus } from '@/api/provider'
+import type { Event, EventType, Matching, Note, OpportunityDetail } from '@/api/types'
 import { JOB_STATUSES, JOB_TERMINAL_STATUSES } from '@/api/types'
 import { BandBadge, EmptyState, ScoreBar, ScoreDial, StatusBadge } from '@/components/common'
-import { Badge, Button, Card, Select, Skeleton, useToast } from '@/components/ui'
-import { dueMeta, formatDateTime, humanizeToken, salaryLabel } from '@/lib/format'
+import { Badge, Button, Card, Select, Skeleton, Textarea, useToast } from '@/components/ui'
+import { dueMeta, formatDateTime, humanizeToken, salaryLabel, timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 /* ─── Pipeline stepper ─────────────────────────────────────────────────────── */
@@ -279,6 +294,193 @@ function NoteItem({ note }: { note: Note }) {
   )
 }
 
+/* ─── Notes (list + inline add [W2]) ──────────────────────────────────────── */
+
+function NotesCard({ o }: { o: OpportunityDetail }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const [draft, setDraft] = useState('')
+
+  const addNoteMutation = useMutation({
+    mutationFn: (text: string) => appendOpportunityNote(o.id, text),
+    onSuccess: () => {
+      setDraft('')
+      void queryClient.invalidateQueries({ queryKey: ['opportunity', o.id] })
+      void queryClient.invalidateQueries({ queryKey: ['opportunity-events', o.id] })
+    },
+    onError: (err) => {
+      toast.error('Could not add note', { description: err.message })
+    },
+  })
+
+  const submit = (): void => {
+    const text = draft.trim()
+    if (!text) {
+      toast.error('Note text required', { description: 'Write something before adding.' })
+      return
+    }
+    addNoteMutation.mutate(text)
+  }
+
+  return (
+    <Card className="flex flex-col gap-3 px-4 pt-4 pb-4">
+      <h2 className="font-mono text-[10px] font-semibold tracking-[0.25em] text-[var(--color-muted)]">
+        NOTES
+      </h2>
+      {o.notes.length === 0 ? (
+        <p className="text-xs text-[var(--color-muted)]">No notes yet.</p>
+      ) : (
+        <ul className="divide-y divide-[var(--color-border)]/40">
+          {o.notes.map((note, i) => (
+            <NoteItem key={i} note={note} />
+          ))}
+        </ul>
+      )}
+      {/* Inline add (optimistic via invalidate on success) */}
+      <div className="flex flex-col gap-2 border-t border-[var(--color-border)]/60 pt-3">
+        <Textarea
+          rows={2}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Add a note…"
+          aria-label="New note"
+          disabled={addNoteMutation.isPending}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') submit()
+          }}
+        />
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] text-[var(--color-muted)]/70">⌘/Ctrl + Enter</span>
+          <Button size="sm" onClick={submit} disabled={addNoteMutation.isPending || draft.trim() === ''}>
+            {addNoteMutation.isPending ? 'Adding…' : 'Add note'}
+          </Button>
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+/* ─── Activity log timeline [W2] ──────────────────────────────────────────── */
+
+const EVENT_META: Record<string, { icon: LucideIcon; label: string }> = {
+  opportunity_imported: { icon: Download, label: 'Imported' },
+  opportunity_created: { icon: Plus, label: 'Created' },
+  status_changed: { icon: ArrowRight, label: 'Status' },
+  note_added: { icon: StickyNote, label: 'Note' },
+  signal_created: { icon: Radio, label: 'Signal' },
+  signal_promoted: { icon: Radio, label: 'Promoted' },
+  signal_dismissed: { icon: Radio, label: 'Dismissed' },
+  agent_run: { icon: Bot, label: 'Agent run' },
+  import_run: { icon: Upload, label: 'Import' },
+  gate_decision: { icon: ShieldCheck, label: 'Gate' },
+}
+
+function EventIcon({ type }: { type: EventType | string }) {
+  const meta = EVENT_META[type] ?? { icon: FilePlus2, label: 'Event' }
+  const Icon = meta.icon
+  const accent =
+    type === 'status_changed'
+      ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300'
+      : type === 'note_added'
+        ? 'border-amber-400/30 bg-amber-400/10 text-amber-300'
+        : type === 'opportunity_imported' || type === 'import_run'
+          ? 'border-sky-400/30 bg-sky-400/10 text-sky-300'
+          : 'border-[var(--color-border)] bg-white/[0.04] text-[var(--color-muted)]'
+  return (
+    <span
+      className={cn(
+        'grid size-6 shrink-0 place-items-center rounded-full border',
+        accent,
+      )}
+      title={meta.label}
+      aria-hidden
+    >
+      <Icon className="size-3" strokeWidth={2} />
+    </span>
+  )
+}
+
+function ActivityLog({ id }: { id: string }) {
+  const [showAll, setShowAll] = useState(false)
+  const { data, isPending, isError } = useQuery({
+    queryKey: ['opportunity-events', id],
+    queryFn: () => getOpportunityEvents(id),
+  })
+
+  if (isPending) {
+    return (
+      <Card className="flex flex-col gap-3 px-4 pt-4 pb-4" aria-busy="true">
+        <h2 className="font-mono text-[10px] font-semibold tracking-[0.25em] text-[var(--color-muted)]">
+          ACTIVITY LOG
+        </h2>
+        <div className="flex flex-col gap-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center gap-3">
+              <Skeleton className="size-6 rounded-full" />
+              <Skeleton className="h-4 flex-1" />
+            </div>
+          ))}
+        </div>
+      </Card>
+    )
+  }
+
+  if (isError || !data) {
+    return (
+      <Card className="px-4 pt-4 pb-4">
+        <h2 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.25em] text-[var(--color-muted)]">
+          ACTIVITY LOG
+        </h2>
+        <p className="text-xs text-[var(--color-muted)]">Activity unavailable right now.</p>
+      </Card>
+    )
+  }
+
+  const events: Event[] = data.items
+  const CAP = 20
+  const visible = showAll ? events : events.slice(0, CAP)
+
+  return (
+    <Card className="flex flex-col gap-3 px-4 pt-4 pb-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-mono text-[10px] font-semibold tracking-[0.25em] text-[var(--color-muted)]">
+          ACTIVITY LOG
+        </h2>
+        <Badge variant="outline" className="font-mono text-[9px] tracking-[0.15em]">
+          {data.total} EVENT{data.total === 1 ? '' : 'S'}
+        </Badge>
+      </div>
+      {events.length === 0 ? (
+        <p className="text-xs text-[var(--color-muted)]">No recorded activity yet.</p>
+      ) : (
+        <ol className="relative flex flex-col">
+          {/* vertical line */}
+          <span
+            aria-hidden
+            className="absolute top-3 bottom-3 left-3 w-px -translate-x-1/2 bg-[var(--color-border)]/80"
+          />
+          {visible.map((event) => (
+            <li key={event.id} className="relative flex items-start gap-3 py-1.5">
+              <EventIcon type={event.type} />
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <p className="text-sm leading-5 text-[var(--color-text)]/90">{event.summary}</p>
+                <p className="font-mono text-[10px] tracking-wider text-[var(--color-muted)] tabular-nums">
+                  {event.type} · {timeAgo(event.at)}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      {events.length > CAP && (
+        <Button variant="ghost" size="sm" className="w-fit" onClick={() => setShowAll((v) => !v)}>
+          {showAll ? 'Show recent only' : `Show all ${events.length} events`}
+        </Button>
+      )}
+    </Card>
+  )
+}
+
 /* ─── Graph neighbors ──────────────────────────────────────────────────────── */
 
 function NeighborChips({ o }: { o: OpportunityDetail }) {
@@ -460,20 +662,8 @@ export function OpportunityDetailPage() {
         </div>
 
         <div className="flex flex-col gap-4">
-          <Card className="px-4 pt-4 pb-2">
-            <h2 className="mb-1 font-mono text-[10px] font-semibold tracking-[0.25em] text-[var(--color-muted)]">
-              NOTES
-            </h2>
-            {o.notes.length === 0 ? (
-              <p className="py-2 text-xs text-[var(--color-muted)]">No notes yet.</p>
-            ) : (
-              <ul className="divide-y divide-[var(--color-border)]/40">
-                {o.notes.map((note, i) => (
-                  <NoteItem key={i} note={note} />
-                ))}
-              </ul>
-            )}
-          </Card>
+          <NotesCard o={o} />
+          <ActivityLog id={o.id} />
           <Card className="pt-4">
             <h2 className="mb-2 px-4 font-mono text-[10px] font-semibold tracking-[0.25em] text-[var(--color-muted)]">
               GRAPH

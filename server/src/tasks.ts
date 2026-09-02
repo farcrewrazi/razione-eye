@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { createTaskSchema, taskStatusSchema, updateTaskSchema, type TaskData } from '@razione-eye/shared';
 import { getCtx, err } from './http-util.ts';
+import { nodeEventsHandler } from './events.ts';
 
 export const tasksRoute = new Hono()
   .get('/', (c) => {
@@ -22,6 +23,7 @@ export const tasksRoute = new Hono()
     });
     return c.json({ items, total });
   })
+  .get('/:id/events', nodeEventsHandler('TASK'))
   .post('/', async (c) => {
     const { nodes, edges } = getCtx(c);
     const body: unknown = await c.req.json().catch(() => null);

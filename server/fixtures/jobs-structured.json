@@ -1,0 +1,87 @@
+{
+  "jobs": [
+    {
+      "company": "NexLabs Sdn Bhd",
+      "role": "Senior Backend Engineer",
+      "location": "Cyberjaya",
+      "salary": "RM12,000 - RM16,000",
+      "url": "https://www.jobstreet.com.my/job/83412001",
+      "source": "JobStreet",
+      "stack": "Node.js, TypeScript, PostgreSQL, Redis",
+      "notes": "Fintech payments platform. AI-assisted dev encouraged.",
+      "discovered_at": "2026-08-20",
+      "contact": { "recruiter": "Aina Rahman", "email": "aina@nexlabs.my" }
+    },
+    {
+      "company": "CloudKinetiq",
+      "role": "Full Stack Developer",
+      "location": "Kuala Lumpur (Hybrid)",
+      "salary": "RM10k-RM14k",
+      "url": "https://www.jobstreet.com.my/job/83412002",
+      "source": "JobStreet",
+      "stack": "React, Node.js, AWS",
+      "discovered_at": "2026-08-20"
+    },
+    {
+      "company": "DataBridge Solutions",
+      "role": "Senior Software Engineer (Platform)",
+      "location": "Cyberjaya",
+      "salary": "RM13k - RM17k",
+      "url": "https://www.jobstreet.com.my/job/83412003",
+      "source": "JobStreet",
+      "stack": "Node.js, GraphQL, Kubernetes",
+      "notes": "Internal developer platform team. Uses Claude Code internally.",
+      "discovered_at": "2026-08-21"
+    },
+    {
+      "company": "ByteWorks Technologies",
+      "role": "Frontend Engineer",
+      "location": "Bangsar South, KL",
+      "salary": "RM8,000 - RM11,000",
+      "url": "https://www.jobstreet.com.my/job/83412004",
+      "source": "JobStreet",
+      "stack": "React, TypeScript, Vite",
+      "discovered_at": "2026-08-21"
+    },
+    {
+      "company": "QuantumLeap AI",
+      "role": "AI Engineer (Applied)",
+      "location": "Cyberjaya",
+      "salary": "RM14k-RM18k",
+      "url": "https://www.jobstreet.com.my/job/83412005",
+      "source": "JobStreet",
+      "stack": "Python, TypeScript, LangChain, pgvector",
+      "notes": "Building multi-agent orchestration products. Strong AI culture.",
+      "discovered_at": "2026-08-22"
+    },
+    {
+      "company": "Silverline Systems",
+      "role": "Node.js Developer",
+      "location": "Petaling Jaya",
+      "salary": "RM9k - RM12k",
+      "url": "https://www.jobstreet.com.my/job/83412006",
+      "source": "JobStreet",
+      "stack": "Node.js, Express, MySQL",
+      "discovered_at": "2026-08-22"
+    },
+    {
+      "company": "Vertex Digital",
+      "role": "Software Engineer",
+      "location": "Cyberjaya",
+      "url": "https://www.jobstreet.com.my/job/83412007",
+      "source": "JobStreet",
+      "stack": "JavaScript, React",
+      "discovered_at": "2026-08-23"
+    },
+    {
+      "company": "",
+      "role": "Backend Engineer (Payments)",
+      "location": "Kuala Lumpur",
+      "salary": "RM11k-RM15k",
+      "url": "https://www.jobstreet.com.my/job/83412008",
+      "source": "JobStreet",
+      "notes": "Recruiter withheld company name until screen. Confidential fintech.",
+      "discovered_at": "2026-08-23"
+    }
+  ]
+}

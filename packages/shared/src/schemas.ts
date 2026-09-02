@@ -139,6 +139,18 @@ export const SIGNAL_SOURCES = [
 ] as const;
 export const signalSourceSchema = z.enum(SIGNAL_SOURCES);
 
+/** Where a job record was discovered / imported from (free-form; common values enumerated for the FE). */
+export const JOB_SOURCES = [
+  'linkedin',
+  'jobstreet',
+  'indeed',
+  'careers_page',
+  'agent',
+  'referral',
+  'manual',
+  'import',
+] as const;
+
 export const SIGNAL_DISPOSITIONS = ['NEW', 'PROMOTED', 'DISMISSED', 'DUPLICATE'] as const;
 export const signalDispositionSchema = z.enum(SIGNAL_DISPOSITIONS);
 
@@ -387,6 +399,32 @@ export const edgeSchema = z.object({
   created_at: isoTimestampSchema,
 });
 
+// ─── Events (append-only activity log — Wave 2) ──────────────────────────────
+
+export const EVENT_TYPES = [
+  'opportunity_created',
+  'opportunity_imported',
+  'status_changed',
+  'note_added',
+  'signal_created',
+  'signal_promoted',
+  'signal_dismissed',
+  'import_run',
+  'agent_run',
+  'gate_decision',
+] as const;
+export const eventTypeSchema = z.enum(EVENT_TYPES);
+
+export const eventSchema = z.object({
+  id: ulidSchema,
+  at: isoTimestampSchema,
+  type: eventTypeSchema,
+  node_id: ulidSchema.nullable(),
+  summary: z.string(),
+  data: z.record(z.unknown()).nullable(),
+});
+
+
 // ─── Request bodies ──────────────────────────────────────────────────────────
 
 export const createOpportunitySchema = z
@@ -484,6 +522,74 @@ export const createEdgeSchema = z
   })
   .strict();
 
+// ─── Import pipeline (T1.1/T1.2 — Wave 2) ────────────────────────────────────
+
+export const IMPORT_FORMATS = ['json', 'csv', 'md', 'chat'] as const;
+export const importFormatSchema = z.enum(IMPORT_FORMATS);
+
+export const importFileSchema = z
+  .object({
+    name: z.string().min(1),
+    format: importFormatSchema,
+    content: z.string(),
+  })
+  .strict();
+
+export const importRequestSchema = z
+  .object({
+    files: z.array(importFileSchema).min(1).max(50),
+  })
+  .strict();
+
+export const importFlaggedSchema = z.object({
+  record: z.record(z.unknown()),
+  reason: z.string(),
+  signal_id: ulidSchema.optional(),
+  file: z.string().optional(),
+});
+
+export const importDuplicateSchema = z.object({
+  kept: z.string().min(1),
+  dropped: z.string().min(1),
+  file: z.string().optional(),
+  /** 'batch' = duplicate within this import run; 'existing' = matched an OPPORTUNITY already in the graph (idempotent re-import). */
+  reason: z.enum(['batch', 'existing']).optional(),
+});
+
+export const importFileReportSchema = z.object({
+  path: z.string(),
+  format: importFormatSchema,
+  raw_records: z.number().int().nonnegative(),
+  normalized: z.number().int().nonnegative(),
+  flagged: z.array(importFlaggedSchema),
+  duplicates: z.array(importDuplicateSchema),
+});
+
+export const importReportSchema = z.object({
+  ran_at: isoTimestampSchema,
+  files: z.array(importFileReportSchema),
+  created: z.object({
+    opportunities: z.number().int().nonnegative(),
+    companies: z.number().int().nonnegative(),
+    edges: z.number().int().nonnegative(),
+  }),
+  totals: z.object({
+    raw_records: z.number().int().nonnegative(),
+    normalized: z.number().int().nonnegative(),
+    flagged: z.number().int().nonnegative(),
+    duplicates: z.number().int().nonnegative(),
+  }),
+});
+
+// ─── Notes append (activity log) ─────────────────────────────────────────────
+
+export const appendNoteSchema = z
+  .object({
+    text: z.string().min(1),
+  })
+  .strict();
+
+
 // ─── Error envelope ──────────────────────────────────────────────────────────
 
 export const errorEnvelopeSchema = z.object({
@@ -534,3 +640,13 @@ export type UpdateTask = z.infer<typeof updateTaskSchema>;
 export type UpdateProfile = z.infer<typeof updateProfileSchema>;
 export type CreateEdge = z.infer<typeof createEdgeSchema>;
 export type ErrorEnvelope = z.infer<typeof errorEnvelopeSchema>;
+export type EventType = z.infer<typeof eventTypeSchema>;
+export type EyeEvent = z.infer<typeof eventSchema>;
+export type ImportFormat = z.infer<typeof importFormatSchema>;
+export type ImportFile = z.infer<typeof importFileSchema>;
+export type ImportRequest = z.infer<typeof importRequestSchema>;
+export type ImportFlagged = z.infer<typeof importFlaggedSchema>;
+export type ImportDuplicate = z.infer<typeof importDuplicateSchema>;
+export type ImportFileReport = z.infer<typeof importFileReportSchema>;
+export type ImportReport = z.infer<typeof importReportSchema>;
+export type AppendNote = z.infer<typeof appendNoteSchema>;

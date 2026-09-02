@@ -7,6 +7,7 @@ import {
   type SignalData,
 } from '@razione-eye/shared';
 import { getCtx, err } from './http-util.ts';
+import { nodeEventsHandler } from './events.ts';
 
 export const signalsRoute = new Hono()
   .get('/', (c) => {
@@ -37,7 +38,7 @@ export const signalsRoute = new Hono()
     return c.json({ items: filtered, total: signalType ? filtered.length : total });
   })
   .post('/', async (c) => {
-    const { nodes } = getCtx(c);
+    const { nodes, events } = getCtx(c);
     const body: unknown = await c.req.json().catch(() => null);
     const parsed = createSignalSchema.safeParse(body);
     if (!parsed.success) {
@@ -53,8 +54,15 @@ export const signalsRoute = new Hono()
       notes: input.notes ?? [],
       data: input.data as unknown as Record<string, unknown>,
     });
+    events.record({
+      type: 'signal_created',
+      node_id: node.id,
+      summary: `Signal created (${input.data.signal_type}, ${node.source})`,
+      data: { signal_type: input.data.signal_type },
+    });
     return c.json(node, 201);
   })
+  .get('/:id/events', nodeEventsHandler('SIGNAL'))
   .get('/:id', (c) => {
     const { nodes } = getCtx(c);
     const node = nodes.getById(c.req.param('id'));
@@ -62,7 +70,7 @@ export const signalsRoute = new Hono()
     return c.json(node);
   })
   .patch('/:id', async (c) => {
-    const { nodes } = getCtx(c);
+    const { nodes, events } = getCtx(c);
     const node = nodes.getById(c.req.param('id'));
     if (!node || node.type !== 'SIGNAL') return err(c, 404, 'NOT_FOUND', 'signal not found');
 
@@ -80,5 +88,16 @@ export const signalsRoute = new Hono()
       ...(input.notes !== undefined ? { notes: input.notes } : {}),
       data: mergedData as Record<string, unknown>,
     });
+
+    if (input.status && input.status !== node.status) {
+      const eventType =
+        input.status === 'PROMOTED' ? 'signal_promoted' : input.status === 'DISMISSED' ? 'signal_dismissed' : 'status_changed';
+      events.record({
+        type: eventType,
+        node_id: node.id,
+        summary: `Signal ${node.status} → ${input.status}`,
+        data: { from: node.status, to: input.status },
+      });
+    }
     return c.json(updated);
   });

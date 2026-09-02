@@ -18,7 +18,7 @@ export const agentsRoute = new Hono()
     return c.json(node);
   })
   .post('/:id/run', (c) => {
-    const { nodes } = getCtx(c);
+    const { nodes, events } = getCtx(c);
     const node = nodes.getById(c.req.param('id'));
     if (!node || node.type !== 'AGENT') return err(c, 404, 'NOT_FOUND', 'agent not found');
 
@@ -28,5 +28,11 @@ export const agentsRoute = new Hono()
     const runs = [...data.runs, { at: now, status: 'empty' as const, summary: 'stub run — capability not implemented in Phase 0' }].slice(-RUNS_CAP);
     const patched: AgentData = { ...data, last_run: now, last_status: 'empty', runs };
     const updated = nodes.update(node.id, { data: { ...patched } });
+    events.record({
+      type: 'agent_run',
+      node_id: node.id,
+      summary: `Agent "${data.name}" run: empty (stub)`,
+      data: { status: 'empty', at: now },
+    });
     return c.json(updated);
   });

@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import {
+  JOB_STATUSES,
   STATUS_BY_OPPORTUNITY_TYPE,
+  appendNoteSchema,
   bandForScore,
   createOpportunitySchema,
   jobOpportunityDataSchema,
@@ -11,6 +13,8 @@ import {
   type Node,
 } from '@razione-eye/shared';
 import { getCtx, err } from './http-util.ts';
+import { nodeEventsHandler } from './events.ts';
+import { nowIso } from './ulid.ts';
 
 /** Validate status against the pipeline for this opportunity_type. */
 function statusValidForType(opportunityType: string, status: string): boolean {
@@ -62,7 +66,37 @@ export const opportunitiesRoute = new Hono()
 
     const paged = band ? filtered.slice(offset, offset + limit) : filtered;
 
+    // board=true → grouped-by-status columns for the FE pipeline board (JOB statuses in pipeline order).
+    if (q['board'] === 'true') {
+      const columns = JOB_STATUSES.map((status) => ({
+        status,
+        items: filtered.filter((n) => n.status === status),
+      }));
+      return c.json({ columns, total: filtered.length });
+    }
+
     return c.json({ items: paged, total: band ? filtered.length : _total });
+  })
+  .get('/:id/events', nodeEventsHandler('OPPORTUNITY'))
+  .post('/:id/notes', async (c) => {
+    const { nodes, events } = getCtx(c);
+    const node = nodes.getById(c.req.param('id'));
+    if (!node || node.type !== 'OPPORTUNITY') return err(c, 404, 'NOT_FOUND', 'opportunity not found');
+
+    const body: unknown = await c.req.json().catch(() => null);
+    const parsed = appendNoteSchema.safeParse(body);
+    if (!parsed.success) {
+      return err(c, 422, 'VALIDATION', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
+    }
+    const note = { text: parsed.data.text, created_at: nowIso() };
+    const updated = nodes.update(node.id, { notes: [...node.notes, note] });
+    events.record({
+      type: 'note_added',
+      node_id: node.id,
+      summary: `Note added to "${node.name ?? node.id}"`,
+      data: { text: parsed.data.text },
+    });
+    return c.json(updated, 201);
   })
   .get('/:id', (c) => {
     const { nodes, edges } = getCtx(c);
@@ -79,7 +113,7 @@ export const opportunitiesRoute = new Hono()
     return c.json({ ...withBand(node), edges: allEdges, neighbors });
   })
   .post('/', async (c) => {
-    const { nodes, edges } = getCtx(c);
+    const { nodes, edges, events } = getCtx(c);
     const body: unknown = await c.req.json().catch(() => null);
     const parsed = createOpportunitySchema.safeParse(body);
     if (!parsed.success) {
@@ -116,6 +150,13 @@ export const opportunitiesRoute = new Hono()
         edges.belongsTo(node.id, company.id);
       }
     }
+
+    events.record({
+      type: 'opportunity_created',
+      node_id: node.id,
+      summary: `Opportunity "${node.name ?? node.id}" created (${status})`,
+      data: { status, opportunity_type: input.opportunity_type, source: node.source },
+    });
 
     return c.json(withBand(node), 201);
   })
@@ -154,7 +195,7 @@ export const opportunitiesRoute = new Hono()
     return c.json(withBand(updated!));
   })
   .patch('/:id/status', async (c) => {
-    const { nodes } = getCtx(c);
+    const { nodes, events } = getCtx(c);
     const node = nodes.getById(c.req.param('id'));
     if (!node || node.type !== 'OPPORTUNITY') return err(c, 404, 'NOT_FOUND', 'opportunity not found');
 
@@ -166,6 +207,13 @@ export const opportunitiesRoute = new Hono()
     if (!statusValidForType(node.opportunity_type!, parsed.data.status)) {
       return err(c, 422, 'INVALID_STATUS', `status ${parsed.data.status} is not valid for opportunity_type ${node.opportunity_type}`);
     }
+    const previous = node.status;
     const updated = nodes.update(node.id, { status: parsed.data.status });
+    events.record({
+      type: 'status_changed',
+      node_id: node.id,
+      summary: `"${node.name ?? node.id}": ${previous} → ${parsed.data.status}`,
+      data: { from: previous, to: parsed.data.status },
+    });
     return c.json(withBand(updated!));
   });

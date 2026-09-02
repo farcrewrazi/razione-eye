@@ -4,13 +4,15 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { NodesRepo } from './nodes.ts';
 import { EdgesRepo } from './edges.ts';
+import { EventsRepo } from './events.ts';
 
 export interface AppContext {
   db: DatabaseSync;
   nodes: NodesRepo;
   edges: EdgesRepo;
+  events: EventsRepo;
 }
 
 export function makeContext(db: DatabaseSync): AppContext {
-  return { db, nodes: new NodesRepo(db), edges: new EdgesRepo(db) };
+  return { db, nodes: new NodesRepo(db), edges: new EdgesRepo(db), events: new EventsRepo(db) };
 }

@@ -12,6 +12,7 @@
 import { get, patch, post, put } from './client'
 import { bandForScore } from './mock/band'
 import { deriveBriefs, deriveDashboard, deriveNextBestAction } from './mock/derive'
+import { deriveOpportunityEvents, recordMockEvent } from './mock/events'
 import {
   MOCK_NOW,
   mockAgents,
@@ -32,8 +33,10 @@ import type {
   CreateSignalInput,
   CreateTaskInput,
   DashboardAggregate,
+  Event,
   Health,
   ListCompaniesParams,
+  ListEventsParams,
   ListOpportunitiesParams,
   ListSignalsParams,
   ListTasksParams,
@@ -158,11 +161,15 @@ export async function putProfile(input: UpdateProfileInput): Promise<Person> {
   if (apiMode() === 'real') return put<Person>('/api/profile', input)
   await delay()
   const { tags, notes, ...dataPatch } = input
+  // Mirror real-mode JSON semantics: undefined keys never overwrite stored values.
+  const definedPatch = Object.fromEntries(Object.entries(dataPatch).filter(([, v]) => v !== undefined))
+  const fullName = typeof definedPatch.full_name === 'string' ? definedPatch.full_name : undefined
   db.profile = {
     ...db.profile,
     tags: tags ?? db.profile.tags,
     notes: notes ?? db.profile.notes,
-    data: { ...db.profile.data, ...dataPatch },
+    data: { ...db.profile.data, ...definedPatch },
+    name: fullName ?? db.profile.name,
     updated_at: new Date().toISOString(),
   }
   return clone(db.profile)
@@ -239,8 +246,52 @@ export async function patchOpportunityStatus(id: string, status: string): Promis
   if (opportunity.opportunity_type === 'JOB' && !JOB_STATUSES.includes(status as (typeof JOB_STATUSES)[number])) {
     throw new Error(`INVALID_STATUS: ${status} is not a JOB pipeline status`)
   }
+  const now = new Date().toISOString()
   opportunity.status = status
-  opportunity.updated_at = new Date().toISOString()
+  opportunity.updated_at = now
+  // Record the status_changed event (contract §4 — records an event on write).
+  recordMockEvent({
+    at: now,
+    type: 'status_changed',
+    node_id: id,
+    summary: `Status moved to ${status}.`,
+    data: { status },
+  })
+  return clone(withBand(opportunity))
+}
+
+/** GET /api/opportunities/:id/events [W2] → { items: Event[], total } (newest first). */
+export async function getOpportunityEvents(
+  id: string,
+  params: ListEventsParams = {},
+): Promise<{ items: Event[]; total: number }> {
+  if (apiMode() === 'real') {
+    const query = buildQuery({ limit: params.limit, offset: params.offset })
+    return get<{ items: Event[]; total: number }>(`/api/opportunities/${id}/events${query}`)
+  }
+  await delay()
+  const opportunity = db.opportunities.find((o) => o.id === id) ?? notFound(`opportunity ${id}`)
+  const items = deriveOpportunityEvents(opportunity)
+  const total = items.length
+  return clone({ items: applyLimitOffset(items, params.limit, params.offset), total })
+}
+
+/** POST /api/opportunities/:id/notes [W2] — body {text}; appends note + note_added event. → Node */
+export async function appendOpportunityNote(id: string, text: string): Promise<Opportunity> {
+  if (apiMode() === 'real') return post<Opportunity>(`/api/opportunities/${id}/notes`, { text })
+  await delay()
+  const opportunity = db.opportunities.find((o) => o.id === id) ?? notFound(`opportunity ${id}`)
+  const now = new Date().toISOString()
+  opportunity.notes.push({ text, created_at: now })
+  opportunity.updated_at = now
+  // Register the note_added event so subsequent getOpportunityEvents include it.
+  recordMockEvent({
+    at: now,
+    type: 'note_added',
+    node_id: id,
+    summary: 'Note added.',
+    data: { text },
+  })
   return clone(withBand(opportunity))
 }
 

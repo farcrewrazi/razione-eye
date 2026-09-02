@@ -5,6 +5,7 @@
 
 import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router'
+import { Link } from 'react-router'
 import { ChevronsLeft, ChevronsRight } from 'lucide-react'
 import { Toaster } from '@/components/ui/toast'
 import { NAV_ITEMS, crumbsFor } from '@/lib/nav'
@@ -121,6 +122,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
 function TopBar() {
   const { pathname } = useLocation()
   const crumbs = crumbsFor(pathname)
+  const isActiveRoute = (to: string): boolean => pathname === to || pathname.startsWith(`${to}/`)
   const date = new Date().toLocaleDateString(undefined, {
     weekday: 'short',
     day: 'numeric',
@@ -154,9 +156,25 @@ function TopBar() {
           )}
         </ol>
       </nav>
-      <time className="shrink-0 font-mono text-xs tracking-wider text-[var(--color-muted)] tabular-nums">
-        {date}
-      </time>
+      <div className="flex shrink-0 items-center gap-4">
+        <time className="font-mono text-xs tracking-wider text-[var(--color-muted)] tabular-nums">
+          {date}
+        </time>
+        {/* Razi Profile access — subtle "R" avatar */}
+        <Link
+          to="/profile"
+          aria-label="Razi Profile"
+          title="Razi Profile"
+          className={cn(
+            'grid size-8 place-items-center rounded-full border font-mono text-xs font-bold transition-colors',
+            isActiveRoute('/profile')
+              ? 'border-[var(--color-accent)]/60 bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+              : 'border-[var(--color-border)] text-[var(--color-muted)] hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)]',
+          )}
+        >
+          R
+        </Link>
+      </div>
     </header>
   )
 }

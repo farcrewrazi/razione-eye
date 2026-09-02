@@ -17,6 +17,7 @@ const CompanyDetailPage = lazy(() => import('@/routes/companies-detail'))
 const SignalsPage = lazy(() => import('@/routes/signals'))
 const AgentsPage = lazy(() => import('@/routes/agents'))
 const DailyBriefPage = lazy(() => import('@/routes/daily-brief'))
+const ProfilePage = lazy(() => import('@/routes/profile'))
 
 function lazyPage(element: ReactElement) {
   return <Suspense fallback={<PageFallback />}>{element}</Suspense>
@@ -55,6 +56,7 @@ const router = createBrowserRouter([
       { path: 'signals', element: lazyPage(<SignalsPage />) },
       { path: 'agents', element: lazyPage(<AgentsPage />) },
       { path: 'daily-brief', element: lazyPage(<DailyBriefPage />) },
+      { path: 'profile', element: lazyPage(<ProfilePage />) },
       { path: '*', element: <NotFound /> },
     ],
   },

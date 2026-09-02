@@ -253,6 +253,40 @@ export interface Edge {
   created_at: string
 }
 
+// ─── Events / activity log (contract §1 [W2]) ─────────────────────────────────
+
+export const EVENT_TYPES = [
+  'opportunity_imported',
+  'opportunity_created',
+  'status_changed',
+  'note_added',
+  'signal_created',
+  'signal_promoted',
+  'signal_dismissed',
+  'agent_run',
+  'import_run',
+  'gate_decision',
+] as const
+
+export type EventType = (typeof EVENT_TYPES)[number]
+
+/** Append-only activity-log row (contract §1 [W2]). */
+export interface Event {
+  id: string
+  at: string
+  type: EventType
+  /** null for run-level events (e.g. import_run). */
+  node_id: string | null
+  summary: string
+  /** payload; import_run events carry the full ImportReport. */
+  data: Record<string, unknown> | null
+}
+
+export interface ListEventsParams {
+  limit?: number
+  offset?: number
+}
+
 // ─── Opportunities (computed `band` on reads) ─────────────────────────────────
 
 /** Opportunity read shape — ApiNode with computed band + resolved company. */
