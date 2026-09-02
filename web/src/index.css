@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+/*
+ * RaziOne Eye — dark base theme.
+ * A handful of CSS variables consumed via `bg-[var(--color-*)]` etc.
+ */
+:root {
+  --color-bg: #0a0a0f;
+  --color-surface: #12121a;
+  --color-border: #26263a;
+  --color-text: #e7e7f0;
+  --color-muted: #8b8ba3;
+  --color-accent: #7dd3fc;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}

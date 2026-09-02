@@ -1,0 +1,16 @@
+{
+  "name": "razione-eye",
+  "private": true,
+  "version": "0.1.0",
+  "description": "RaziOne Eye — single-user local-first career + business operations command center",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @razione-eye/server dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "seed": "pnpm --filter @razione-eye/server seed",
+    "backup": "pnpm --filter @razione-eye/server backup"
+  }
+}
