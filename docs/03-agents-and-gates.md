@@ -107,6 +107,8 @@ Opportunity Score
 
 ### 2.4 Business Analyst
 
+> All Business Eye output (WEBSITE + CONSULTANCY opportunities) is generated on behalf of **RaziSurf** — every opportunity the analyst produces carries `offered_by → RaziSurf`.
+
 Analysis checklist per discovered business:
 
 ```text

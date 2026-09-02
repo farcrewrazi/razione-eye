@@ -49,6 +49,8 @@ RaziOne Eye is one system, not five tools. Each "Eye" is a lens on the same unde
 3. **Control Eye** — the minimum viable version ships in Phase 1 (dashboard + pipeline + next best action); it deepens every phase after.
 4. **Business Eye, Growth Eye, Gem Watch** — same Opportunity system, attached later. Never rebuilt separately.
 
+> **Business Eye entity note:** all Business Eye activity — website B2B builds and consultancy-agency work — is conducted under **RaziSurf** (Farcrew Razi's business entity), not Farcrew Razi personally. In the graph, RaziSurf is a `COMPANY` node owned by Farcrew Razi (`owns` edge), and every business opportunity carries `offered_by → RaziSurf`. See [02-data-model.md §5](02-data-model.md).
+
 ---
 
 ## 2. The operating loop
@@ -117,7 +119,7 @@ Every feature in RaziOne Eye must fit one stage of this cycle. If it doesn't, it
 ### 3.1 Presentation (L4) — custom web app
 
 - **D-001: the UI is a custom web dashboard.** ClickUp may be synchronized later (bonus), but the intelligence system lives in RaziOne Eye.
-- Single user (Razi). No auth complexity in v0.x — a local/trusted-network app is enough.
+- Single user (Farcrew Razi). No auth complexity in v0.x — a local/trusted-network app is enough.
 - v0.1 screens: Dashboard, Opportunities, Tasks, Companies, Signals, Agents, Daily Brief.
 
 ### 3.2 Intelligence (L3) — Orchestrator, agents, adapter layer
@@ -154,12 +156,12 @@ RaziOne Orchestrator
 The graph is not a UI gimmick. It represents **relationships between everything being done**:
 
 ```text
-Razi ── knows ──► Node.js ◄── uses ──── Company A
-  │                                     │
-  │                                  hiring
-  ├── lives_near ──► Cyberjaya ◄── located_in
-  │                                     │
-  └──────────── matches ──► Job A ── belongs_to ──┘
+Farcrew Razi ── knows ──► Node.js ◄── uses ──── Company A
+   │                                     │
+   │                                  hiring
+   ├── lives_near ──► Cyberjaya ◄── located_in
+   │                                     │
+   └──────────── matches ──► Job A ── belongs_to ──┘
 ```
 
 Payoff queries (built as bonus phase B1, once data exists):

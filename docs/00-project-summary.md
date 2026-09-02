@@ -11,8 +11,9 @@
 
 One system sitting **above** all the work streams — not "an AI agent for jobs" plus "another AI for affiliate" plus "a crypto bot". The agents manage the work; Razi never ends up managing the agents.
 
-**Owner:** Razi (single user, forever — this is not a SaaS).
+**Owner:** **Farcrew Razi** — single user, forever; this is not a SaaS. (Short name "Razi" is used throughout these docs.)
 **Current focus:** job hunting — Senior Software Engineer / Team Lead roles, software houses, **Cyberjaya**, multi-AI-orchestration environments.
+**Business entity:** **RaziSurf** — Farcrew Razi's business vehicle. All Business Eye work (website B2B builds + software consultancy agency) is pursued, quoted and delivered **under RaziSurf**, never under Farcrew Razi personally.
 
 ---
 
@@ -21,7 +22,7 @@ One system sitting **above** all the work streams — not "an AI agent for jobs"
 | Eye | Domain | Ships |
 |---|---|---|
 | **Career** | Job discovery → analysis → application tracking | Phase 1–2 ⭐ |
-| **Business** | Website B2B + consultancy agency leads | Phase 3 |
+| **Business** | Website B2B + consultancy agency leads — operated under **RaziSurf** | Phase 3 |
 | **Growth** | Affiliate marketing + content engine | Phase 4 |
 | **Signal** | Raw ingestion: LinkedIn/FB/X/Threads, business sites, comments, Ram's Gem | grows with each phase |
 | **Control** | Dashboard, tasks, agents, graph, metrics, daily brief | v0.1 core |
@@ -100,6 +101,7 @@ Bonus & future (graph intelligence queries, opportunity intelligence, 8 parked a
 | D-003 | Import pipeline handles mixed formats (JSON/CSV/Markdown/chat exports) |
 | D-004 | Tech stack stays open until Phase 0 kickoff |
 | D-005 | PM rule: nothing automated until Phase 1 proves the core loop |
+| D-006 | Business Eye (website B2B + consultancy) operates under RaziSurf |
 
 ---
 

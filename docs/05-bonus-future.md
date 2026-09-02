@@ -108,6 +108,8 @@ Candidates (decision open — see [decisions-log.md](decisions-log.md)):
 
 **Trigger:** Phase 3 proves teaser-outreach converts better than plain outreach.
 
+> Teaser sites are **RaziSurf** deliverables (D-006) — RaziSurf-branded, offered under the RaziSurf entity.
+
 - [ ] Template system (per business category: clinic, restaurant, hotel…)
 - [ ] One-click generate from Business Analyst checklist
 - [ ] Hosting + per-lead preview links

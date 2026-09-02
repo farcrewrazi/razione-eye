@@ -10,8 +10,8 @@ Design rule from the blueprint: **don't create hundreds of models.** Eight objec
 ## 1. The core objects
 
 ```text
-PERSON        people: Razi, recruiters, founders, creators, KOLs
-COMPANY       employers, target B2B businesses, agencies
+PERSON        people: Farcrew Razi (the owner), recruiters, founders, creators, KOLs
+COMPANY       employers, target B2B businesses, agencies (incl. RaziSurf)
 OPPORTUNITY   the unit of pursuit — job, website deal, consultancy, affiliate play, gem
 PROJECT       active work: a client build, a teaser site, a content series
 TASK          a single actionable step — the only thing Razi executes directly
@@ -85,10 +85,13 @@ notes:
 
 ### 2.2 WEBSITE opportunity (Business Eye)
 
+> All Business Eye opportunities (WEBSITE + CONSULTANCY) are offered and delivered **under RaziSurf** — Farcrew Razi's business entity. Every opportunity carries `offered_by → RaziSurf (COMPANY)`, and the graph links `Farcrew Razi ── owns ──► RaziSurf`.
+
 ```yaml
 company: XYZ Dental
 location: Cyberjaya
 source: Business Scout
+offered_by: RaziSurf          # the entity pursuing this work
 
 opportunity_score: 87
 
@@ -112,6 +115,7 @@ next_action:
 ```yaml
 company: Acme Logistics
 source: Signal Watcher (pain-signal scan)
+offered_by: RaziSurf          # consultancy agency work runs under RaziSurf
 
 signal_phrases:            # what triggered discovery
   - "we're still using Excel for inventory"
@@ -287,23 +291,27 @@ AGENT
 ### Example sub-graph (Career)
 
 ```text
-Razi
- ├── knows ──────────► Node.js ◄───── uses ─────┐
- │                                              │
- ├── experienced_in ► AI orchestration ◄── uses ─┤
- │                                              │
- └── lives_near ────► Cyberjaya ◄──── located_in │
-                                                │
-                          Company A ──── hiring ─┴─► Job A
-                              │                        │
-                          posted_by                 belongs_to
-                              │                        │
-                          Recruiter X ─────────────────┘
+Farcrew Razi (PERSON)
+  ├── knows ──────────► Node.js ◄───── uses ─────┐
+  │                                              │
+  ├── experienced_in ► AI orchestration ◄── uses ─┤
+  │                                              │
+  └── lives_near ────► Cyberjaya ◄──── located_in │
+                                                 │
+                           Company A ──── hiring ─┴─► Job A
+                               │                        │
+                           posted_by                 belongs_to
+                               │                        │
+                           Recruiter X ─────────────────┘
 ```
 
 ### Example sub-graph (Business)
 
+RaziSurf is a first-class `COMPANY` node in the graph — `Farcrew Razi ── owns ──► RaziSurf` — and is the entity every Business Eye opportunity is offered by:
+
 ```text
+Farcrew Razi ── owns ──► RaziSurf
+                            ▲
 Company B (XYZ Dental)
    ↓ has_problem
 Poor Website

@@ -30,7 +30,8 @@
 - [ ] T0.5 Implement the OPPORTUNITY type system (JOB / WEBSITE / CONSULTANCY / AFFILIATE / CRYPTO)
 - [ ] T0.6 Implement the SIGNAL object + disposition states (NEW / PROMOTED / DISMISSED / DUPLICATE)
 - [ ] T0.7 Implement the TASK object with due dates + status
-- [ ] T0.8 Razi Profile: skills, seniority, salary band, location (Cyberjaya), AI-culture preferences
+- [ ] T0.8 Razi Profile (the Farcrew Razi `PERSON` node): full name, skills, seniority, salary band, location (Cyberjaya), AI-culture preferences
+- [ ] T0.8b Seed **RaziSurf** as a `COMPANY` node + `Farcrew Razi ── owns ──► RaziSurf` edge — the business entity behind all Business Eye work ([02-data-model.md §5](02-data-model.md))
 - [ ] T0.9 Dashboard shell: navigation for the 7 v0.1 modules ([01-system-structure.md §6](01-system-structure.md))
 - [ ] T0.10 Agent registry (name, capability, kind, schedule, last run) — stub entries for the six starter agents
 - [ ] T0.11 Backup/snapshot routine (career data is irreplaceable)
@@ -149,6 +150,8 @@
 ## Phase 3 — Business Eye (B2B Website + Consultancy)
 
 **Goal:** the same Opportunity system starts hunting business. Websites for local businesses + consultancy leads, one pipeline, zero rebuilds.
+
+> **Entity note:** all Business Eye work is conducted under **RaziSurf** (Farcrew Razi's business entity). Outreach, teasers, proposals and won contracts are all RaziSurf-branded; opportunities carry `offered_by → RaziSurf` in the graph.
 
 ### Stories
 

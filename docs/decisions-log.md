@@ -2,6 +2,7 @@
 
 > Lightweight ADR-style log. Decisions are cheap to change early, expensive later. When a decision changes, supersede it — don't edit history.
 > Started: 2026-09-01
+> Owner of record: **Farcrew Razi** (referred to as "Razi" throughout the docs).
 
 ---
 
@@ -52,6 +53,16 @@
 - **Context:** The temptation is to build social scrapers, affiliate automation, business scanners and a crypto bot immediately. That inverts the system: Razi manages agents instead of agents managing work.
 - **Decision:** **No social scrapers, affiliate automation, business scanner or crypto bot until Phase 1 exit criteria are met** (30 jobs → scored pipeline → applications flowing through the Action Gate).
 - **Consequences:** Slower-feeling start, dramatically higher chance the core architecture is right before complexity compounds. Bonus work stays parked with explicit triggers ([05-bonus-future.md](05-bonus-future.md)).
+
+---
+
+## D-006 — Business Eye operates under RaziSurf
+
+- **Date:** 2026-09-01
+- **Status:** ✅ Accepted
+- **Context:** The website-B2B and consultancy-agency activities are an actual business, not informal personal gigs. They run under RaziSurf, Farcrew Razi's business entity.
+- **Decision:** All Business Eye work — discovery, outreach, teasers, proposals, contracts — is branded and tracked as **RaziSurf** activity. RaziSurf is a first-class `COMPANY` node (`Farcrew Razi ── owns ──► RaziSurf`), and every WEBSITE/CONSULTANCY opportunity carries `offered_by → RaziSurf`. Seeded in Phase 0 (T0.8b).
+- **Consequences:** Business opportunities are cleanly attributable to the entity (useful for B2 graph queries and later revenue analytics). Career Eye stays personal; no cross-contamination between "Farcrew Razi the engineer" and "RaziSurf the vendor".
 
 ---
 
