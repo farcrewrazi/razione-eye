@@ -9,6 +9,9 @@
 - Every phase must respect the Action Gate ([03-agents-and-gates.md §4](03-agents-and-gates.md)) — no exceptions, no "just this once".
 - The PM rule (D-005) holds until Phase 1 exits: **no scrapers, no affiliate automation, no business scanner, no crypto bot.**
 
+**Dev tags** (per D-007 — full split in [06-dev-task-split.md](06-dev-task-split.md)):
+`[BE]` → **backend** (storage, graph, agents, pipelines, APIs) · `[FE]` → **frontend** (dashboard, boards, screens, widgets) · `[BE+FE]` → split task — each side takes its half from the split doc.
+
 ---
 
 ## Phase 0 — Foundation
@@ -23,18 +26,18 @@
 
 ### Tasks
 
-- [ ] T0.1 Decide storage engine + graph approach (close D-004; options in [01-system-structure.md §3.4](01-system-structure.md))
-- [ ] T0.2 Scaffold repo: app skeleton, config, seed script
-- [ ] T0.3 Implement the 8 core objects + common fields ([02-data-model.md §1](02-data-model.md))
-- [ ] T0.4 Implement graph edges — at minimum: `knows`, `located_in`, `hiring`, `belongs_to`, `matches`, `has_problem`, `solved_by` ([02-data-model.md §5](02-data-model.md))
-- [ ] T0.5 Implement the OPPORTUNITY type system (JOB / WEBSITE / CONSULTANCY / AFFILIATE / CRYPTO)
-- [ ] T0.6 Implement the SIGNAL object + disposition states (NEW / PROMOTED / DISMISSED / DUPLICATE)
-- [ ] T0.7 Implement the TASK object with due dates + status
-- [ ] T0.8 Razi Profile (the Farcrew Razi `PERSON` node): full name, skills, seniority, salary band, location (Cyberjaya), AI-culture preferences
-- [ ] T0.8b Seed **RaziSurf** as a `COMPANY` node + `Farcrew Razi ── owns ──► RaziSurf` edge — the business entity behind all Business Eye work ([02-data-model.md §5](02-data-model.md))
-- [ ] T0.9 Dashboard shell: navigation for the 7 v0.1 modules ([01-system-structure.md §6](01-system-structure.md))
-- [ ] T0.10 Agent registry (name, capability, kind, schedule, last run) — stub entries for the six starter agents
-- [ ] T0.11 Backup/snapshot routine (career data is irreplaceable)
+- [ ] T0.1 `[BE]` Decide storage engine + graph approach (close D-004; options in [01-system-structure.md §3.4](01-system-structure.md))
+- [ ] T0.2 `[BE+FE]` Scaffold repo: app skeleton, config, seed script
+- [ ] T0.3 `[BE]` Implement the 8 core objects + common fields ([02-data-model.md §1](02-data-model.md))
+- [ ] T0.4 `[BE]` Implement graph edges — at minimum: `knows`, `located_in`, `hiring`, `belongs_to`, `matches`, `has_problem`, `solved_by` ([02-data-model.md §5](02-data-model.md))
+- [ ] T0.5 `[BE]` Implement the OPPORTUNITY type system (JOB / WEBSITE / CONSULTANCY / AFFILIATE / CRYPTO)
+- [ ] T0.6 `[BE]` Implement the SIGNAL object + disposition states (NEW / PROMOTED / DISMISSED / DUPLICATE)
+- [ ] T0.7 `[BE]` Implement the TASK object with due dates + status
+- [ ] T0.8 `[BE+FE]` Razi Profile (the Farcrew Razi `PERSON` node): full name, skills, seniority, salary band, location (Cyberjaya), AI-culture preferences
+- [ ] T0.8b `[BE]` Seed **RaziSurf** as a `COMPANY` node + `Farcrew Razi ── owns ──► RaziSurf` edge — the business entity behind all Business Eye work ([02-data-model.md §5](02-data-model.md))
+- [ ] T0.9 `[FE]` Dashboard shell: navigation for the 7 v0.1 modules ([01-system-structure.md §6](01-system-structure.md))
+- [ ] T0.10 `[BE]` Agent registry (name, capability, kind, schedule, last run) — stub entries for the six starter agents
+- [ ] T0.11 `[BE]` Backup/snapshot routine (career data is irreplaceable)
 
 ### Exit criteria
 
@@ -64,31 +67,32 @@
 
 ### Tasks
 
-- [ ] T1.1 Build the **import pipeline** for mixed formats (D-003):
-  - [ ] T1.1.1 JSON/CSV importer (mapping to Opportunity Node schema)
-  - [ ] T1.1.2 Markdown/notes importer (semi-structured parsing)
-  - [ ] T1.1.3 Agent-conversation export importer (extract job entries from chat logs)
-  - [ ] T1.1.4 **Normalization step**: all formats → unified Opportunity Node; flag incomplete records instead of guessing
-  - [ ] T1.1.5 Dedup pass (same company+role+source → keep richest, link duplicates)
-  - [ ] T1.1.6 Manual-entry form as the fallback for stragglers
-- [ ] T1.2 Import + verify the ~30 jobs (counts must reconcile: imported = 30 ± stragglers flagged)
-- [ ] T1.3 Job Analyst agent (native):
-  - [ ] T1.3.1 Extraction: company, role, location, salary, stack, source, URL, notes
-  - [ ] T1.3.2 Profile comparison across the 6 sub-scores ([02-data-model.md §6.1](02-data-model.md))
-  - [ ] T1.3.3 Separate company score vs role score
-  - [ ] T1.3.4 Band assignment (90–100 PRIORITY / 75–89 APPLY / 60–74 REVIEW / <60 ARCHIVE)
-  - [ ] T1.3.5 `next_action` generation with due dates
-- [ ] T1.4 Run analysis over all imported jobs → ranked pipeline
-- [ ] T1.5 Pipeline board UI with drag-between-stages + terminal states
-- [ ] T1.6 Opportunity detail view: scores, matching breakdown, notes, contact, activity log
-- [ ] T1.7 Companies screen: auto-created from job imports (stack, location, AI culture notes)
-- [ ] T1.8 Application tracking: status transitions, applied-date, reply/interview logging, follow-up reminders
-- [ ] T1.9 Next Best Action widget (top-priority task with [Review] [Apply])
-- [ ] T1.10 Daily Brief v1:
-  - [ ] T1.10.1 Morning: counts by eye + top 3–5 priorities
-  - [ ] T1.10.2 Evening: completed/pending/new + one AI observation + recommendation
-- [ ] T1.11 Action Gate v1: apply-task flow = system prepares → Razi confirms → status updates (see [03-agents-and-gates.md §4](03-agents-and-gates.md))
-- [ ] T1.12 Signal inbox screen with manual entry + promote-to-opportunity action
+- [ ] T1.1 `[BE]` Build the **import pipeline** for mixed formats (D-003):
+  - [ ] T1.1.1 `[BE]` JSON/CSV importer (mapping to Opportunity Node schema)
+  - [ ] T1.1.2 `[BE]` Markdown/notes importer (semi-structured parsing)
+  - [ ] T1.1.3 `[BE]` Agent-conversation export importer (extract job entries from chat logs)
+  - [ ] T1.1.4 `[BE]` **Normalization step**: all formats → unified Opportunity Node; flag incomplete records instead of guessing
+  - [ ] T1.1.5 `[BE]` Dedup pass (same company+role+source → keep richest, link duplicates)
+  - [ ] T1.1.6 `[FE]` Manual-entry form as the fallback for stragglers
+- [ ] T1.2 `[BE]` Import + verify the ~30 jobs (counts must reconcile: imported = 30 ± stragglers flagged)
+- [ ] T1.3 `[BE]` Job Analyst agent (native):
+  - [ ] T1.3.1 `[BE]` Extraction: company, role, location, salary, stack, source, URL, notes
+  - [ ] T1.3.2 `[BE]` Profile comparison across the 6 sub-scores ([02-data-model.md §6.1](02-data-model.md))
+  - [ ] T1.3.3 `[BE]` Separate company score vs role score
+  - [ ] T1.3.4 `[BE]` Band assignment (90–100 PRIORITY / 75–89 APPLY / 60–74 REVIEW / <60 ARCHIVE)
+  - [ ] T1.3.5 `[BE]` `next_action` generation with due dates
+- [ ] T1.4 `[BE]` Run analysis over all imported jobs → ranked pipeline
+- [ ] T1.5 `[FE]` Pipeline board UI with drag-between-stages + terminal states
+- [ ] T1.6 `[FE]` Opportunity detail view: scores, matching breakdown, notes, contact, activity log
+- [ ] T1.7 `[FE]` Companies screen: auto-created from job imports (stack, location, AI culture notes)
+- [ ] T1.8 `[BE+FE]` Application tracking: status transitions, applied-date, reply/interview logging, follow-up reminders
+- [ ] T1.9 `[FE]` Next Best Action widget (top-priority task with [Review] [Apply])
+- [ ] T1.10 `[BE+FE]` Daily Brief v1:
+  - [ ] T1.10.1 `[BE]` Morning: counts by eye + top 3–5 priorities
+  - [ ] T1.10.2 `[BE]` Evening: completed/pending/new + one AI observation + recommendation
+  - [ ] T1.10.3 `[FE]` Daily Brief screen + agent status rendering
+- [ ] T1.11 `[BE+FE]` Action Gate v1: apply-task flow = system prepares → Razi confirms → status updates (see [03-agents-and-gates.md §4](03-agents-and-gates.md))
+- [ ] T1.12 `[FE]` Signal inbox screen with manual entry + promote-to-opportunity action
 
 ### Exit criteria
 
@@ -118,23 +122,23 @@
 
 ### Tasks
 
-- [ ] T2.1 Adapter Layer implementation (D-002) — wrap existing discovery agents:
-  - [ ] T2.1.1 Capability manifest format + adapter contract ([01-system-structure.md §3.2](01-system-structure.md))
-  - [ ] T2.1.2 Output normalizer: external agent output → typed SIGNALs
-  - [ ] T2.1.3 First adapter: the agent that found the original 30 jobs
-- [ ] T2.2 Source connectors (via adapters — orchestrator still never scrapes):
-  - [ ] T2.2.1 LinkedIn (posts + jobs)
-  - [ ] T2.2.2 Facebook
-  - [ ] T2.2.3 X
-  - [ ] T2.2.4 Threads
-  - [ ] T2.2.5 Company career pages (watched-company list)
-  - [ ] T2.2.6 Google results + job portals
-- [ ] T2.3 Search-phrase config (direct + culture + hidden-signal sets from [03-agents-and-gates.md §2.1](03-agents-and-gates.md)) — editable in UI, not code
-- [ ] T2.4 Hidden hiring signal classifier (SOCIAL_POST → hiring-intent detection)
-- [ ] T2.5 Dedup engine: new signal vs existing opportunities (company+role+recency window)
-- [ ] T2.6 Orchestrator scheduler: 2–4 cycles/day, backoff on errors, run-now button
-- [ ] T2.7 Signal triage UI: inbox, dismiss, promote; "AI determines → Opportunity" auto-routing for high-confidence signals
-- [ ] T2.8 Alerting: new high-match discovery surfaces in Next Best Action + Daily Brief
+- [ ] T2.1 `[BE]` Adapter Layer implementation (D-002) — wrap existing discovery agents:
+  - [ ] T2.1.1 `[BE]` Capability manifest format + adapter contract ([01-system-structure.md §3.2](01-system-structure.md))
+  - [ ] T2.1.2 `[BE]` Output normalizer: external agent output → typed SIGNALs
+  - [ ] T2.1.3 `[BE]` First adapter: the agent that found the original 30 jobs
+- [ ] T2.2 `[BE]` Source connectors (via adapters — orchestrator still never scrapes):
+  - [ ] T2.2.1 `[BE]` LinkedIn (posts + jobs)
+  - [ ] T2.2.2 `[BE]` Facebook
+  - [ ] T2.2.3 `[BE]` X
+  - [ ] T2.2.4 `[BE]` Threads
+  - [ ] T2.2.5 `[BE]` Company career pages (watched-company list)
+  - [ ] T2.2.6 `[BE]` Google results + job portals
+- [ ] T2.3 `[BE+FE]` Search-phrase config (direct + culture + hidden-signal sets from [03-agents-and-gates.md §2.1](03-agents-and-gates.md)) — editable in UI, not code
+- [ ] T2.4 `[BE]` Hidden hiring signal classifier (SOCIAL_POST → hiring-intent detection)
+- [ ] T2.5 `[BE]` Dedup engine: new signal vs existing opportunities (company+role+recency window)
+- [ ] T2.6 `[BE+FE]` Orchestrator scheduler: 2–4 cycles/day, backoff on errors, run-now button
+- [ ] T2.7 `[BE+FE]` Signal triage UI: inbox, dismiss, promote; "AI determines → Opportunity" auto-routing for high-confidence signals
+- [ ] T2.8 `[BE+FE]` Alerting: new high-match discovery surfaces in Next Best Action + Daily Brief
 
 ### Exit criteria
 
@@ -163,17 +167,17 @@
 
 ### Tasks
 
-- [ ] T3.1 Business Scout agent: local-business discovery (Cyberjaya + surrounding), categories from [03-agents-and-gates.md §2.3](03-agents-and-gates.md)
-- [ ] T3.2 Pain-signal scanner: phrase set config + SOCIAL_POST/BUSINESS_DISCOVERY classification
-- [ ] T3.3 Business Analyst agent: 8-point checklist → problems detected + suggested offer + opportunity score
-- [ ] T3.4 Business pipeline board (DISCOVERED BUSINESS → … → WON) — reuses Phase 1 machinery with WEBSITE/CONSULTANCY types
-- [ ] T3.5 Teaser-site workflow:
-  - [ ] T3.5.1 PROJECT object activation for teaser builds
-  - [ ] T3.5.2 Generate-teaser action (draft brief via AI; actual generation can be manual/assisted in this phase)
-  - [ ] T3.5.3 Teaser gallery + attach-to-outreach
-- [ ] T3.6 Outreach drafting (AI writes it, Action Gate approves it, Razi sends it)
-- [ ] T3.7 Meeting/proposal tracking (MEETING → PROPOSAL → WON/LOST states)
-- [ ] T3.8 Graph enrichment: `has_problem` / `solved_by` / `offered_by (RaziSurf)` edges populated
+- [ ] T3.1 `[BE]` Business Scout agent: local-business discovery (Cyberjaya + surrounding), categories from [03-agents-and-gates.md §2.3](03-agents-and-gates.md)
+- [ ] T3.2 `[BE]` Pain-signal scanner: phrase set config + SOCIAL_POST/BUSINESS_DISCOVERY classification
+- [ ] T3.3 `[BE]` Business Analyst agent: 8-point checklist → problems detected + suggested offer + opportunity score
+- [ ] T3.4 `[FE]` Business pipeline board (DISCOVERED BUSINESS → … → WON) — reuses Phase 1 machinery with WEBSITE/CONSULTANCY types
+- [ ] T3.5 `[BE+FE]` Teaser-site workflow:
+  - [ ] T3.5.1 `[BE]` PROJECT object activation for teaser builds
+  - [ ] T3.5.2 `[BE]` Generate-teaser action (draft brief via AI; actual generation can be manual/assisted in this phase)
+  - [ ] T3.5.3 `[FE]` Teaser gallery + attach-to-outreach
+- [ ] T3.6 `[BE+FE]` Outreach drafting (AI writes it, Action Gate approves it, Razi sends it)
+- [ ] T3.7 `[FE]` Meeting/proposal tracking (MEETING → PROPOSAL → WON/LOST states)
+- [ ] T3.8 `[BE]` Graph enrichment: `has_problem` / `solved_by` / `offered_by (RaziSurf)` edges populated
 
 ### Exit criteria
 
@@ -199,13 +203,13 @@
 
 ### Tasks
 
-- [ ] T4.1 CONTENT object activation: ideas, scripts, drafts, published, metrics
-- [ ] T4.2 Content pipeline board (per [02-data-model.md §4.3](02-data-model.md))
-- [ ] T4.3 Import existing affiliate blueprint tasks into the pipeline
-- [ ] T4.4 Affiliate Analyst agent: comment ingestion → clustering → demand scores
-- [ ] T4.5 Content-opportunity cards: topic, demand score, evidence counts, suggested format, affiliate-product links
-- [ ] T4.6 Publish flow behind the Action Gate (draft → approve → publish-assist)
-- [ ] T4.7 Performance tracking: metrics per published piece (manual entry OK in this phase; API later — B4)
+- [ ] T4.1 `[BE]` CONTENT object activation: ideas, scripts, drafts, published, metrics
+- [ ] T4.2 `[FE]` Content pipeline board (per [02-data-model.md §4.3](02-data-model.md))
+- [ ] T4.3 `[BE]` Import existing affiliate blueprint tasks into the pipeline
+- [ ] T4.4 `[BE]` Affiliate Analyst agent: comment ingestion → clustering → demand scores
+- [ ] T4.5 `[FE]` Content-opportunity cards: topic, demand score, evidence counts, suggested format, affiliate-product links
+- [ ] T4.6 `[BE+FE]` Publish flow behind the Action Gate (draft → approve → publish-assist)
+- [ ] T4.7 `[BE+FE]` Performance tracking: metrics per published piece (manual entry OK in this phase; API later — B4)
 
 ### Exit criteria
 
@@ -230,11 +234,11 @@
 
 ### Tasks
 
-- [ ] T5.1 Ram's Gem source adapter (channel ingestion → GEM_CALL signals)
-- [ ] T5.2 Crypto pipeline: SIGNAL → TOKEN → QUICK ANALYSIS → ALERT ([02-data-model.md §4.4](02-data-model.md))
-- [ ] T5.3 Analysis checklist data + classification UI (🟢/🟡/🔴)
-- [ ] T5.4 Alert routing: Daily Brief section + optional push (delivery channel decided in B6/open questions)
-- [ ] T5.5 Hard rule enshrined in code: **no trading automation exists in any phase** — buy actions are not implemented, by design
+- [ ] T5.1 `[BE]` Ram's Gem source adapter (channel ingestion → GEM_CALL signals)
+- [ ] T5.2 `[BE]` Crypto pipeline: SIGNAL → TOKEN → QUICK ANALYSIS → ALERT ([02-data-model.md §4.4](02-data-model.md))
+- [ ] T5.3 `[BE+FE]` Analysis checklist data + classification UI (🟢/🟡/🔴)
+- [ ] T5.4 `[BE+FE]` Alert routing: Daily Brief section + optional push (delivery channel decided in B6/open questions)
+- [ ] T5.5 `[BE]` Hard rule enshrined in code: **no trading automation exists in any phase** — buy actions are not implemented, by design
 
 ### Exit criteria
 

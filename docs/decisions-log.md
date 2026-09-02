@@ -66,6 +66,16 @@
 
 ---
 
+## D-007 — Development split: backend × frontend
+
+- **Date:** 2026-09-01
+- **Status:** ✅ Accepted
+- **Context:** Implementation will be delegated to two coding agents working in parallel (executor assignment tracked separately from the labels — agents may be swapped without touching the task structure). Clear ownership boundaries prevent merge collisions and duplicated work.
+- **Decision:** Every task in the roadmap is tagged **`[BE]` → backend** (storage, graph, objects, agents, pipelines, import, API schemas) or **`[FE]` → frontend** (dashboard, boards, screens, forms, widgets). Mixed tasks are decomposed — each side takes its half — and tracked in [06-dev-task-split.md](06-dev-task-split.md), which serves as the hand-off doc for both sides. The two sides coordinate through the API contract (schemas from [02-data-model.md](02-data-model.md), frozen by BE before building, mocked by FE when needed).
+- **Consequences:** Parallel development without blocking; BE carries the heavier load by design (agents/pipelines dominate this system). FE can always work ahead against mocked schemas. Any new task added later must be tagged BE/FE at creation time.
+
+---
+
 ## Open questions
 
 | # | Question | Where it lands | Status |

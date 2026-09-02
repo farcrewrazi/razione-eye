@@ -102,6 +102,7 @@ Bonus & future (graph intelligence queries, opportunity intelligence, 8 parked a
 | D-004 | Tech stack stays open until Phase 0 kickoff |
 | D-005 | PM rule: nothing automated until Phase 1 proves the core loop |
 | D-006 | Business Eye (website B2B + consultancy) operates under RaziSurf |
+| D-007 | Dev split: backend × frontend queues, coordinated via API contract ([06-dev-task-split.md](06-dev-task-split.md)) |
 
 ---
 
@@ -113,8 +114,9 @@ Bonus & future (graph intelligence queries, opportunity intelligence, 8 parked a
 | [01-system-structure.md](01-system-structure.md) | 5 Eyes, operating loop, system layers, adapter layer, homepage contract |
 | [02-data-model.md](02-data-model.md) | 8 core objects, opportunity types, pipelines, graph edges, scoring |
 | [03-agents-and-gates.md](03-agents-and-gates.md) | Orchestrator, 6 starter agents, Action Gate approval matrix |
-| [04-phases-stories-tasks.md](04-phases-stories-tasks.md) | Phases 0–5: stories, tasks, exit criteria — the build plan |
+| [04-phases-stories-tasks.md](04-phases-stories-tasks.md) | Phases 0–5: stories, tasks (BE/FE-tagged), exit criteria — the build plan |
 | [05-bonus-future.md](05-bonus-future.md) | Bonus phases B1–B9, parked agents, explicit non-goals |
+| [06-dev-task-split.md](06-dev-task-split.md) | Dev hand-off: backend queue × frontend queue, API contract |
 | [decisions-log.md](decisions-log.md) | Decision log + open questions |
 
 ---
