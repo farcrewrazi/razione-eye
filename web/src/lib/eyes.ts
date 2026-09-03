@@ -109,10 +109,12 @@ export const EYES: Record<EyeId, EyeDef> = {
     live: true,
     opportunityTypes: ['JOB'],
     signalTypes: ['JOB_POSTING'],
-    // Career workflow keeps Tasks/Signals/Gate/Daily Brief — jobs generate
-    // tasks + gate actions and surface in the brief; hiding them would break
-    // the loop. '/agents' excluded: Control-layer ops registry, cross-eye noise.
-    navAllow: ['/', '/opportunities', '/companies', '/tasks', '/signals', '/gate', '/daily-brief'],
+    // Career workflow keeps Tasks/Gate/Daily Brief — jobs generate tasks +
+    // gate actions and surface in the brief; hiding them would break the
+    // loop. '/signals' removed: the Signals inbox moved into the
+    // Opportunities Inbox tab for Career. '/agents' excluded: Control-layer
+    // ops registry, cross-eye noise.
+    navAllow: ['/', '/opportunities', '/companies', '/tasks', '/gate', '/daily-brief'],
   },
   BUSINESS: {
     id: 'BUSINESS',

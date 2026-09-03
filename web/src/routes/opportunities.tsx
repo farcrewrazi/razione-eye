@@ -1,38 +1,57 @@
 /**
  * Opportunities — the pipeline table (docs/01 §6 module 2) + board view (T1.5).
  *
- * Table/Board segmented control (persisted in localStorage):
+ * Table/Board/Inbox segmented control (persisted in localStorage):
  *   - Table: filterable list, band badges, mono scores, relative timestamps,
  *     limit-50 windowed footer. Row click → /opportunities/:id.
  *   - Board: the 9-stage drag & drop pipeline with terminal zone — see
  *     pipeline.tsx.
+ *   - Inbox: signal triage for the focused eye (eyes with signalTypes, e.g.
+ *     CAREER) — promote/dismiss without leaving the pipeline. Supports
+ *     ?view=inbox as the initial view (redirect target for /signals).
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router'
-import { AlertTriangle, ChevronLeft, ChevronRight, Kanban, Plus, Search, Table2 as TableViewIcon } from 'lucide-react'
-import { listOpportunities } from '@/api/provider'
-import type { Opportunity, ScoreBand } from '@/api/types'
-import { JOB_STATUSES, SCORE_BANDS } from '@/api/types'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate, useSearchParams } from 'react-router'
+import {
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+  Inbox,
+  Kanban,
+  Plus,
+  Search,
+  Table2 as TableViewIcon,
+} from 'lucide-react'
+import { listOpportunities, listSignals, updateSignalDisposition } from '@/api/provider'
+import type { Opportunity, ScoreBand, Signal, SignalDisposition, SignalType } from '@/api/types'
+import { JOB_STATUSES, SCORE_BANDS, SIGNAL_DISPOSITIONS, SIGNAL_TYPES } from '@/api/types'
 import { BandBadge, EmptyState, PageHeader, StatusBadge } from '@/components/common'
-import { Button, Card, Input, Select, Skeleton, Table, Td, Th, Thead, Tr } from '@/components/ui'
+import { NewSignalPanel, PromoteDialog, SignalRow } from '@/components/signals'
+import { Button, Card, Input, Select, Skeleton, Table, Td, Th, Thead, Tr, useToast } from '@/components/ui'
 import { useEyeFocus } from '@/hooks/useEyeFocus'
-import { opportunityInEye } from '@/lib/eyes'
+import { CONTROL_SIGNAL_TYPES, opportunityInEye } from '@/lib/eyes'
 import { salaryLabel, scoreColor, timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { PipelineBoard } from './pipeline'
 
 const PAGE_SIZE = 50
 
-/** localStorage key for the Table/Board view preference. */
+/** localStorage key for the Table/Board/Inbox view preference. */
 const VIEW_PREF_KEY = 'razione-eye:opportunities:view'
-type ViewMode = 'table' | 'board'
+type ViewMode = 'table' | 'board' | 'inbox'
 
-function loadViewPref(): ViewMode {
+function isViewMode(raw: string | null): raw is ViewMode {
+  return raw === 'table' || raw === 'board' || raw === 'inbox'
+}
+
+/** Initial view: ?view= query param wins (e.g. redirect from /signals), then localStorage. */
+function loadViewPref(param: string | null): ViewMode {
+  if (isViewMode(param)) return param
   try {
     const raw = localStorage.getItem(VIEW_PREF_KEY)
-    return raw === 'board' ? 'board' : 'table'
+    return isViewMode(raw) ? raw : 'table'
   } catch {
     return 'table'
   }
@@ -78,14 +97,191 @@ function OpportunityRow({ o, onOpen }: { o: Opportunity; onOpen: (id: string) =>
   )
 }
 
+/* ─── Inbox pane (per-eye signal triage) ────────────────────────────────────── */
+
+/**
+ * Signal triage embedded in Opportunities — mirrors routes/signals.tsx, scoped
+ * to the focused eye. Fetches the wide window and post-filters client-side to
+ * the eye's signal types plus the ops types (SOCIAL_POST / COMMENT) that stay
+ * visible in every eye; an explicit type selection overrides (server filters).
+ */
+function SignalsInboxPane() {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const { eye, def } = useEyeFocus()
+  const [disposition, setDisposition] = useState<SignalDisposition | ''>('')
+  const [signalType, setSignalType] = useState<SignalType | ''>('')
+  const [formOpen, setFormOpen] = useState(false)
+  /** Signal queued for the promote dialog (T1.12). */
+  const [promoting, setPromoting] = useState<Signal | null>(null)
+
+  const defaultType = def.signalTypes[0] ?? 'JOB_POSTING'
+  const eyeTypes = def.signalTypes.length > 0 ? def.signalTypes : null
+  const serverType = signalType || (eyeTypes && eyeTypes.length === 1 ? eyeTypes[0] : undefined)
+
+  const params = {
+    disposition: disposition || undefined,
+    signal_type: serverType,
+    limit: 100,
+  }
+  const { data, isPending, isError, error, refetch } = useQuery({
+    queryKey: ['signals', params, eye],
+    queryFn: () => listSignals(params),
+    placeholderData: (prev) => prev,
+  })
+
+  const dispositionMutation = useMutation({
+    mutationFn: ({ id, next }: { id: string; next: SignalDisposition }) =>
+      updateSignalDisposition(id, next),
+    onSuccess: (s) => {
+      toast.info(`Signal ${String(s.status).toLowerCase()}`, {
+        description: s.name ?? 'Signal updated.',
+      })
+      void queryClient.invalidateQueries({ queryKey: ['signals'] })
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+    onError: (err) => {
+      toast.error('Disposition change failed', { description: err.message })
+    },
+  })
+
+  const allowed = signalType
+    ? null // explicit manual selection — the server already filtered
+    : eyeTypes
+      ? [...eyeTypes, ...CONTROL_SIGNAL_TYPES]
+      : null
+  const items = (data?.items ?? []).filter((s) => !allowed || allowed.includes(s.data.signal_type))
+  const newCount = items.filter((s) => s.status === 'NEW').length
+
+  const onDisposition = (id: string, next: SignalDisposition): void => {
+    if (next === 'PROMOTED') {
+      // Open the promote dialog instead of the bare disposition flip (T1.12).
+      const target = items.find((s) => s.id === id)
+      if (target) setPromoting(target)
+      return
+    }
+    dispositionMutation.mutate({ id, next })
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Select
+          className="w-44"
+          value={disposition}
+          onChange={(e) => setDisposition(e.target.value as SignalDisposition | '')}
+          aria-label="Filter by disposition"
+        >
+          <option value="">Disposition: All</option>
+          {SIGNAL_DISPOSITIONS.map((d) => (
+            <option key={d} value={d}>
+              {d}
+            </option>
+          ))}
+        </Select>
+        <Select
+          className="w-44"
+          value={signalType}
+          onChange={(e) => setSignalType(e.target.value as SignalType | '')}
+          aria-label="Filter by signal type"
+        >
+          <option value="">Type: All</option>
+          {SIGNAL_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </Select>
+        <span className="ml-auto font-mono text-[11px] tracking-wider text-[var(--color-muted)] tabular-nums">
+          {isPending ? '…' : `${items.length} TOTAL`}
+          {!isPending && disposition === 'NEW' ? ` · ${newCount} AWAITING TRIAGE` : ''}
+        </span>
+      </div>
+
+      <NewSignalPanel open={formOpen} onToggle={() => setFormOpen((o) => !o)} defaultType={defaultType} />
+
+      {/* Inbox */}
+      {isPending ? (
+        <Card className="p-3">
+          <div className="flex flex-col gap-2.5" aria-busy="true">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Skeleton key={i} className="h-14 w-full" />
+            ))}
+          </div>
+        </Card>
+      ) : isError ? (
+        <EmptyState
+          icon={<AlertTriangle />}
+          title="Signals unavailable"
+          hint={error?.message ?? 'Signals could not be loaded.'}
+          action={
+            <Button variant="outline" size="sm" onClick={() => void refetch()}>
+              Retry
+            </Button>
+          }
+        />
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon={<Inbox />}
+          title={disposition || signalType ? 'No matches' : `No ${def.shortLabel} Eye signals`}
+          hint={
+            disposition || signalType
+              ? 'Nothing matches the current filters — clear them to see the full inbox.'
+              : `${def.label} detections land here — promote them into the pipeline or dismiss.`
+          }
+        />
+      ) : (
+        <Card className={cn('divide-y divide-[var(--color-border)]/50 overflow-hidden')}>
+          {items.map((s) => (
+            <SignalRow
+              key={s.id}
+              s={s}
+              onDisposition={onDisposition}
+            />
+          ))}
+        </Card>
+      )}
+
+      {/* Promote dialog (T1.12) */}
+      {promoting && <PromoteDialog signal={promoting} onClose={() => setPromoting(null)} />}
+    </div>
+  )
+}
+
 export function OpportunitiesPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { eye, def, focused } = useEyeFocus()
-  const [view, setView] = useState<ViewMode>(loadViewPref)
+  const [view, setView] = useState<ViewMode>(() => loadViewPref(searchParams.get('view')))
   const [q, setQ] = useState('')
   const [status, setStatus] = useState<StatusFilter>('')
   const [band, setBand] = useState<ScoreBand | ''>('')
   const [page, setPage] = useState(0)
+
+  /*
+   * Inbox is per-eye signal triage — only eyes that own signal types (CAREER,
+   * BUSINESS, SIGNAL) get the segment. ?view=inbox on a signal-less eye
+   * (GROWTH/CONTROL) or under All falls back to the table.
+   */
+  const inboxAvailable = focused && def.signalTypes.length > 0
+
+  // ?view= applies once as the initial view, then the URL is cleaned so the
+  // persisted preference takes back over (no sticky query param).
+  const viewParam = searchParams.get('view')
+  useEffect(() => {
+    if (viewParam === null) return
+    if (isViewMode(viewParam) && (viewParam !== 'inbox' || inboxAvailable)) setView(viewParam)
+    const next = new URLSearchParams(searchParams)
+    next.delete('view')
+    setSearchParams(next, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewParam])
+
+  // Fall back to table when the focused eye has no signals inbox.
+  useEffect(() => {
+    if (!inboxAvailable && view === 'inbox') setView('table')
+  }, [inboxAvailable, view])
 
   useEffect(() => {
     try {
@@ -161,14 +357,16 @@ export function OpportunitiesPage() {
         subtitle={subtitle}
         actions={
           <div className="flex items-center gap-3">
-            <span className="font-mono text-xs tracking-wider text-[var(--color-muted)] tabular-nums">
-              {isPending ? '…' : `${total} TOTAL`}
-            </span>
+            {view !== 'inbox' && (
+              <span className="font-mono text-xs tracking-wider text-[var(--color-muted)] tabular-nums">
+                {isPending ? '…' : `${total} TOTAL`}
+              </span>
+            )}
             <Button size="sm" onClick={() => void navigate('/opportunities/new')}>
               <Plus className="size-3.5" />
               Add Job
             </Button>
-            {/* Table / Board segmented control (persisted) */}
+            {/* Table / Board / Inbox segmented control (persisted) */}
             <div
               role="group"
               aria-label="View mode"
@@ -178,6 +376,7 @@ export function OpportunitiesPage() {
                 [
                   ['table', 'Table', TableViewIcon],
                   ['board', 'Board', Kanban],
+                  ...(inboxAvailable ? ([['inbox', 'Inbox', Inbox]] as const) : []),
                 ] as const
               ).map(([mode, label, Icon]) => (
                 <button
@@ -201,7 +400,9 @@ export function OpportunitiesPage() {
         }
       />
 
-      {view === 'board' ? (
+      {view === 'inbox' ? (
+        <SignalsInboxPane />
+      ) : view === 'board' ? (
         <PipelineBoard />
       ) : (
         <>
