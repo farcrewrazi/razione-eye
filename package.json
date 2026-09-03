@@ -8,9 +8,13 @@
   },
   "scripts": {
     "dev": "pnpm --filter @razione-eye/server dev",
+    "dev-stack": "concurrently -n server,web -c blue,green \"pnpm --filter @razione-eye/server dev\" \"pnpm --filter @razione-eye/web dev\"",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "seed": "pnpm --filter @razione-eye/server seed",
     "backup": "pnpm --filter @razione-eye/server backup"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
   }
 }
