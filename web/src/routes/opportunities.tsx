@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
-import { AlertTriangle, ChevronLeft, ChevronRight, Kanban, Search, Table2 as TableViewIcon } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, ChevronRight, Kanban, Plus, Search, Table2 as TableViewIcon } from 'lucide-react'
 import { listOpportunities } from '@/api/provider'
 import type { Opportunity, ScoreBand } from '@/api/types'
 import { JOB_STATUSES, SCORE_BANDS } from '@/api/types'
@@ -135,6 +135,10 @@ export function OpportunitiesPage() {
             <span className="font-mono text-xs tracking-wider text-[var(--color-muted)] tabular-nums">
               {isPending ? '…' : `${total} TOTAL`}
             </span>
+            <Button size="sm" onClick={() => void navigate('/opportunities/new')}>
+              <Plus className="size-3.5" />
+              Add Job
+            </Button>
             {/* Table / Board segmented control (persisted) */}
             <div
               role="group"

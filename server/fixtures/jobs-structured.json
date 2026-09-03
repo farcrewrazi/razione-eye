@@ -74,6 +74,38 @@
       "discovered_at": "2026-08-23"
     },
     {
+      "company": "HexaSoft Solutions",
+      "role": "Full Stack Engineer",
+      "location": "Cyberjaya",
+      "salary": "RM9k-RM13k",
+      "url": "https://www.linkedin.com/jobs/view/40201020",
+      "source": "LinkedIn",
+      "stack": "Vue.js, Node.js",
+      "notes": "Same HexaSoft full-stack role from the CSV export — LinkedIn repost.",
+      "discovered_at": "2026-08-24"
+    },
+    {
+      "company": "NovaForge Labs",
+      "role": "Senior AI Engineer",
+      "location": "Cyberjaya",
+      "salary": "RM15k-RM19k",
+      "url": "https://www.jobstreet.com.my/job/83412012",
+      "source": "JobStreet",
+      "stack": "Python, TypeScript, Node.js",
+      "notes": "Builds multi-agent tooling for logistics clients. Claude Code shop.",
+      "discovered_at": "2026-08-24"
+    },
+    {
+      "company": "BrightStack Digital",
+      "role": "Software Engineer (Product)",
+      "location": "Kuala Lumpur",
+      "salary": "RM9k-RM12k",
+      "url": "https://www.jobstreet.com.my/job/83412013",
+      "source": "JobStreet",
+      "stack": "React, Node.js, PostgreSQL",
+      "discovered_at": "2026-08-24"
+    },
+    {
       "company": "",
       "role": "Backend Engineer (Payments)",
       "location": "Kuala Lumpur",

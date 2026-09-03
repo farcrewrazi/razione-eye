@@ -7,6 +7,7 @@ import {
   CheckSquare,
   LayoutDashboard,
   Radio,
+  ShieldCheck,
   Sunrise,
   type LucideIcon,
 } from 'lucide-react'
@@ -23,6 +24,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/companies', label: 'Companies', icon: Building2 },
   { to: '/signals', label: 'Signals', icon: Radio },
+  { to: '/gate', label: 'Action Gate', icon: ShieldCheck },
   { to: '/agents', label: 'Agents', icon: Bot },
   { to: '/daily-brief', label: 'Daily Brief', icon: Sunrise },
 ]

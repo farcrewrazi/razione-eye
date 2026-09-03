@@ -7,7 +7,9 @@
  *
  * Extraction = pattern mining over message text: numbered/bulleted entries and
  * free lines carrying a company+role signal ("Role at Company", "Company — Role",
- * "Company: Role"), enriched by nearby Location:/Salary:/URL lines.
+ * "Company: Role"), enriched by nearby Location:/Salary:/URL lines. Role-first
+ * entries ("Role — Location — Salary") are captured without a company so
+ * normalization flags them as incomplete instead of dropping the lead.
  * Unmatched job-ish text is preserved in notes.
  */
 import type { RawRecord } from './types.ts';
@@ -221,12 +223,21 @@ function parseCandidate(text: string): RawRecord | null {
       splitRemainder(rest, rec, 'role');
       return rec;
     }
+    // Role-first entry: "Role — Location — Salary" (company unknown). Captured
+    // without a company so normalization flags it as incomplete (T1.1.4) —
+    // a partial lead is never dropped on the floor. The first tail segment is
+    // a location, not a company — split it as such.
+    if (ROLE_WORDS_RE.test(first) && (LOCATION_HINT_RE.test(rest) || SALARY_HINT_RE.test(rest))) {
+      const rec: RawRecord = { role: first };
+      splitRemainder(rest, rec, 'location');
+      return rec;
+    }
   }
   return null;
 }
 
 /** Split "Value — Location — RM…" style tails into the record. */
-function splitRemainder(text: string, rec: RawRecord, firstKey: 'company' | 'role'): void {
+function splitRemainder(text: string, rec: RawRecord, firstKey: 'company' | 'role' | 'location'): void {
   const parts = text.split(/\s+(?:—|–)\s+/).map((p) => p.trim()).filter(Boolean);
   const first = parts.shift();
   if (first) rec[firstKey] = first.replace(/\s+-\s+.*$/, '').trim();
@@ -238,6 +249,13 @@ function splitRemainder(text: string, rec: RawRecord, firstKey: 'company' | 'rol
       const existing = Array.isArray(rec['notes']) ? (rec['notes'] as string[]) : [];
       rec['notes'] = [...existing, part];
     }
+  }
+  // A location captured for a company-less (role-first) record can't attach to
+  // a company — move it into notes so the hint survives for the analyst.
+  if (rec['company'] === undefined && typeof rec['location'] === 'string') {
+    const existing = Array.isArray(rec['notes']) ? (rec['notes'] as string[]) : [];
+    rec['notes'] = [...existing, rec['location'] as string];
+    delete rec['location'];
   }
 }
 

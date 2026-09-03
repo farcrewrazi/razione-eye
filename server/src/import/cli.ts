@@ -60,7 +60,10 @@ function main(): void {
       `  ${f.path} [${f.format}]  raw=${f.raw_records} normalized=${f.normalized} flagged=${f.flagged.length} duplicates=${f.duplicates.length}`,
     );
     for (const fl of f.flagged) console.log(`    ⚑ flagged: ${fl.reason} → signal ${fl.signal_id ?? '?'}`);
-    for (const d of f.duplicates) console.log(`    ⧉ duplicate: kept "${d.kept}", dropped "${d.dropped}" [${d.reason ?? 'batch'}]`);
+    for (const d of f.duplicates) {
+      const tag = d.reason === 'existing' ? 'existing' : d.reason === 'linked' ? 'linked (cross-channel)' : 'batch';
+      console.log(`    ⧉ duplicate: kept "${d.kept}", dropped "${d.dropped}" [${tag}]`);
+    }
   }
   console.log(
     `\nCreated: ${report.created.opportunities} opportunities, ${report.created.companies} companies, ${report.created.edges} edges`,

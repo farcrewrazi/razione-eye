@@ -48,6 +48,9 @@ const STATUS_TONES: Record<string, Tone> = {
   PROMOTED: 'green',
   DISMISSED: 'gray',
   DUPLICATE: 'gray',
+  // Action Gate statuses (T1.11 [W4])
+  PENDING: 'amber',
+  APPROVED: 'green',
   // Agent run statuses
   ok: 'green',
   error: 'red',

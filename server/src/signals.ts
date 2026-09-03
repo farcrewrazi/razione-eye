@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import {
+  bandForScore,
   createSignalSchema,
   signalDispositionSchema,
   signalTypeSchema,
@@ -8,6 +10,23 @@ import {
 } from '@razione-eye/shared';
 import { getCtx, err } from './http-util.ts';
 import { nodeEventsHandler } from './events.ts';
+import { promoteSignal } from './signal-promotion.ts';
+
+const promoteSignalSchema = z
+  .object({
+    data: z
+      .object({
+        role: z.string().min(1).optional(),
+        location: z.string().optional(),
+        salary: z.string().optional(),
+        url: z.string().url().optional(),
+        stack: z.array(z.string()).optional(),
+        notes: z.array(z.string()).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
 
 export const signalsRoute = new Hono()
   .get('/', (c) => {
@@ -100,4 +119,27 @@ export const signalsRoute = new Hono()
       });
     }
     return c.json(updated);
+  })
+  .post('/:id/promote', async (c) => {
+    // T1.12-BE — promote a signal into a JOB OPPORTUNITY (idempotent).
+    const ctx = getCtx(c);
+    const node = ctx.nodes.getById(c.req.param('id'));
+    if (!node || node.type !== 'SIGNAL') return err(c, 404, 'NOT_FOUND', 'signal not found');
+
+    const raw: unknown = await c.req.json().catch(() => ({}));
+    const parsed = promoteSignalSchema.safeParse(raw ?? {});
+    if (!parsed.success) {
+      return err(c, 422, 'VALIDATION', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
+    }
+
+    // Idempotent: already promoted → return the signal + its opportunity.
+    if (node.status === 'PROMOTED' && typeof (node.data as SignalData).promoted_to === 'string') {
+      const existing = ctx.nodes.getById((node.data as SignalData).promoted_to!);
+      if (existing) {
+        return c.json({ signal: node, opportunity: { ...existing, band: bandForScore(existing.score) } });
+      }
+    }
+
+    const { signal, opportunity } = promoteSignal(ctx, node, parsed.data.data ?? {});
+    return c.json({ signal, opportunity: { ...opportunity, band: bandForScore(opportunity.score) } }, 201);
   });

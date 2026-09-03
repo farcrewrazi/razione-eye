@@ -94,7 +94,7 @@ interface BoardCardProps {
 }
 
 function BoardCard({ o, dimmed, dragging, saving, onOpen, onCardDragStart, onCardDragEnd }: BoardCardProps) {
-  const due = o.data.next_action ? dueMeta(o.data.next_action.due) : null
+  const due = o.data.next_action?.due ? dueMeta(o.data.next_action.due) : null
   const company = o.company?.name ?? 'Unknown company'
   const role = o.data.role || o.name || 'Untitled role'
 

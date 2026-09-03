@@ -4,13 +4,16 @@
  * Inbox-style list: type badge + source chip + observed_at relative +
  * content preview (line-clamped) + disposition StatusBadge.
  * Manual signal entry (T1.12 preview) + promote/dismiss row actions.
+ * Promote opens the promote dialog (T1.12) → JOB opportunity (DISCOVERED);
+ * PROMOTED rows link to the created opportunity.
  */
 
-import { useState } from 'react'
+import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router'
 import { AlertTriangle, ArrowUpRight, ChevronDown, Inbox, Plus, X } from 'lucide-react'
-import { createSignal, listSignals, updateSignalDisposition } from '@/api/provider'
-import type { Signal, SignalDisposition, SignalSource, SignalType } from '@/api/types'
+import { createSignal, listSignals, promoteSignal, updateSignalDisposition } from '@/api/provider'
+import type { PromoteSignalData, Signal, SignalDisposition, SignalSource, SignalType } from '@/api/types'
 import { SIGNAL_DISPOSITIONS, SIGNAL_TYPES } from '@/api/types'
 import { EmptyState, PageHeader, StatusBadge } from '@/components/common'
 import { Badge, Button, Card, Input, Select, Skeleton, Textarea, useToast } from '@/components/ui'
@@ -193,6 +196,309 @@ function NewSignalPanel({ open, onToggle }: { open: boolean; onToggle: () => voi
   )
 }
 
+/* ─── Promote dialog (T1.12) ─────────────────────────────────────────────────── */
+
+/** Location datalist suggestions (Klang Valley tech corridor). */
+const LOCATION_SUGGESTIONS = ['Cyberjaya', 'Kuala Lumpur', 'Sepang', 'Putrajaya', 'Bangi', 'Puchong']
+
+/** First http(s) URL found anywhere in the content, else ''. */
+function firstUrl(content: string): string {
+  return content.match(/https?:\/\/[^\s)]+/i)?.[0] ?? ''
+}
+
+/**
+ * Best-effort company/role extraction from the first content line:
+ * "Acme Corp — Senior Engineer" or "Acme Corp  Senior Engineer" splits at the
+ * first `—`/`–`/`-`/`|`/double-space; no separator → whole line is the company.
+ */
+function parseFirstLine(content: string): { company: string; role: string } {
+  const firstLine = content.split('\n', 1)[0]?.trim() ?? ''
+  if (!firstLine) return { company: '', role: 'Untitled role' }
+  const m = firstLine.split(/\s+—\s+|\s+–\s+|\s+-\s+|\s+\|\s+|\s{2,}/)
+  const company = (m[0] ?? '').trim()
+  const role = m.length > 1 && (m[1] ?? '').trim() ? (m[1] ?? '').trim() : 'Untitled role'
+  return { company, role: role || 'Untitled role' }
+}
+
+interface PromoteForm {
+  company: string
+  role: string
+  location: string
+  salary: string
+  url: string
+  stack: string[]
+  notes: string
+}
+
+/** Prefill from the signal content, best-effort. */
+function prefilledForm(s: Signal): PromoteForm {
+  const { company, role } = parseFirstLine(s.data.content)
+  return {
+    company,
+    role,
+    location: '',
+    salary: '',
+    url: s.data.url ?? firstUrl(s.data.content),
+    stack: [],
+    notes: s.data.content,
+  }
+}
+
+/* ─── Stack chip input (Enter adds, × removes — mirrors opportunities-new) ───── */
+
+function StackInput({ values, onChange }: { values: string[]; onChange: (next: string[]) => void }) {
+  const [draft, setDraft] = useState('')
+
+  const add = (): void => {
+    const chip = draft.trim()
+    if (chip && !values.includes(chip)) onChange([...values, chip])
+    setDraft('')
+  }
+
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      add()
+    } else if (e.key === 'Backspace' && draft === '' && values.length > 0) {
+      onChange(values.slice(0, -1))
+    }
+  }
+
+  return (
+    <div
+      className={cn(
+        'flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5',
+        'transition-colors focus-within:border-[var(--color-accent)]/60 focus-within:ring-2 focus-within:ring-[var(--color-accent)]/20',
+      )}
+    >
+      {values.map((chip) => (
+        <span
+          key={chip}
+          className="inline-flex items-center gap-1 rounded border border-[var(--color-accent)]/25 bg-[var(--color-accent)]/10 px-1.5 py-0.5 text-xs text-[var(--color-text)]/90"
+        >
+          {chip}
+          <button
+            type="button"
+            aria-label={`Remove ${chip}`}
+            onClick={() => onChange(values.filter((v) => v !== chip))}
+            className="rounded-sm text-[var(--color-muted)] transition-colors hover:bg-white/10 hover:text-[var(--color-text)]"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </span>
+      ))}
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={onKeyDown}
+        onBlur={add}
+        placeholder={values.length === 0 ? 'Node.js, TypeScript, …' : ''}
+        aria-label="Tech stack — type and press Enter to add"
+        className="min-w-24 flex-1 bg-transparent text-sm text-[var(--color-text)] outline-none placeholder:text-[var(--color-muted)]/60"
+      />
+    </div>
+  )
+}
+
+/* ─── Field wrapper ──────────────────────────────────────────────────────────── */
+
+function Field({
+  label,
+  htmlFor,
+  children,
+  required,
+}: {
+  label: string
+  htmlFor: string
+  children: React.ReactNode
+  required?: boolean
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={htmlFor} className="font-mono text-[10px] tracking-[0.2em] text-[var(--color-muted)]">
+        {label}
+        {required && <span className="ml-0.5 text-[var(--color-accent)]/70">*</span>}
+      </label>
+      {children}
+    </div>
+  )
+}
+
+function PromoteDialog({ signal, onClose }: { signal: Signal; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const [form, setForm] = useState<PromoteForm>(() => prefilledForm(signal))
+
+  // Escape closes (Cancel button + backdrop click also close).
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const set = (patch: Partial<PromoteForm>): void => setForm((f) => ({ ...f, ...patch }))
+
+  const promoteMutation = useMutation({
+    mutationFn: () => {
+      const data: PromoteSignalData = {
+        company: form.company.trim() || undefined,
+        role: form.role.trim() || undefined,
+        location: form.location.trim() || undefined,
+        salary: form.salary.trim() || undefined,
+        url: form.url.trim() || undefined,
+        stack: form.stack.length > 0 ? form.stack : undefined,
+        notes: form.notes.trim() || undefined,
+      }
+      return promoteSignal(signal.id, data)
+    },
+    onSuccess: (result) => {
+      toast.success('Promoted to opportunity', {
+        description: `${result.opportunity.name ?? form.role.trim()} · DISCOVERED`,
+      })
+      void queryClient.invalidateQueries({ queryKey: ['signals'] })
+      void queryClient.invalidateQueries({ queryKey: ['opportunities'] })
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      onClose()
+    },
+    onError: (err) => {
+      toast.error('Promotion failed', { description: err.message })
+    },
+  })
+
+  const valid = form.company.trim() !== '' && form.role.trim() !== ''
+  const locationDatalistId = 'promote-locations'
+
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm"
+      onMouseDown={onClose}
+    >
+      <Card
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="promote-dialog-title"
+        className="my-auto w-full max-w-xl px-5 py-5 shadow-xl shadow-black/50"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 id="promote-dialog-title" className="text-sm font-semibold text-[var(--color-text)]">
+              Promote signal → opportunity
+            </h2>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <SignalTypeBadge type={signal.data.signal_type} />
+              {signal.source && (
+                <Badge variant="outline" className="font-mono text-[10px] tracking-wide">
+                  {signal.source}
+                </Badge>
+              )}
+            </div>
+          </div>
+          <Button variant="ghost" size="sm" aria-label="Close" onClick={onClose}>
+            <X className="size-4" />
+          </Button>
+        </div>
+
+        <form
+          className="mt-4 flex flex-col gap-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (valid && !promoteMutation.isPending) promoteMutation.mutate()
+          }}
+        >
+          <datalist id={locationDatalistId}>
+            {LOCATION_SUGGESTIONS.map((l) => (
+              <option key={l} value={l} />
+            ))}
+          </datalist>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="COMPANY" htmlFor="promote-company" required>
+              <Input
+                id="promote-company"
+                value={form.company}
+                onChange={(e) => set({ company: e.target.value })}
+                placeholder="ABC Technology"
+                aria-required
+                disabled={promoteMutation.isPending}
+              />
+            </Field>
+            <Field label="ROLE" htmlFor="promote-role" required>
+              <Input
+                id="promote-role"
+                value={form.role}
+                onChange={(e) => set({ role: e.target.value })}
+                placeholder="Senior Full-Stack Engineer"
+                aria-required
+                disabled={promoteMutation.isPending}
+              />
+            </Field>
+            <Field label="LOCATION" htmlFor="promote-location">
+              <Input
+                id="promote-location"
+                list={locationDatalistId}
+                value={form.location}
+                onChange={(e) => set({ location: e.target.value })}
+                placeholder="Cyberjaya"
+                disabled={promoteMutation.isPending}
+              />
+            </Field>
+            <Field label="SALARY" htmlFor="promote-salary">
+              <Input
+                id="promote-salary"
+                value={form.salary}
+                onChange={(e) => set({ salary: e.target.value })}
+                placeholder="RM12k-RM16k"
+                disabled={promoteMutation.isPending}
+              />
+            </Field>
+          </div>
+
+          <Field label="URL" htmlFor="promote-url">
+            <Input
+              id="promote-url"
+              type="url"
+              value={form.url}
+              onChange={(e) => set({ url: e.target.value })}
+              placeholder="https://…"
+              disabled={promoteMutation.isPending}
+            />
+          </Field>
+
+          <Field label="STACK" htmlFor="promote-stack">
+            <StackInput values={form.stack} onChange={(stack) => set({ stack })} />
+          </Field>
+
+          <Field label="NOTES" htmlFor="promote-notes">
+            <Textarea
+              id="promote-notes"
+              rows={4}
+              value={form.notes}
+              onChange={(e) => set({ notes: e.target.value })}
+              placeholder="Context, who to contact, why it's interesting…"
+              disabled={promoteMutation.isPending}
+            />
+          </Field>
+
+          <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)]/60 pt-4">
+            <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={promoteMutation.isPending}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" disabled={!valid || promoteMutation.isPending}>
+              <ArrowUpRight className="size-3.5" />
+              {promoteMutation.isPending ? 'Promoting…' : 'Promote'}
+            </Button>
+          </div>
+        </form>
+      </Card>
+    </div>
+  )
+}
+
 /* ─── Inbox row ─────────────────────────────────────────────────────────────── */
 
 function SignalRow({ s, onDisposition }: {
@@ -200,6 +506,7 @@ function SignalRow({ s, onDisposition }: {
   onDisposition: (id: string, disposition: SignalDisposition) => void
 }) {
   const isNew = s.status === 'NEW'
+  const isPromoted = s.status === 'PROMOTED' && Boolean(s.data.promoted_to)
   const hasUrl = Boolean(s.data.url)
 
   return (
@@ -245,6 +552,21 @@ function SignalRow({ s, onDisposition }: {
               </Button>
             </>
           )}
+          {isPromoted && (
+            <Link
+              to={`/opportunities/${s.data.promoted_to}`}
+              title="Open the promoted opportunity"
+              className={cn(
+                'inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs whitespace-nowrap',
+                'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
+                'transition-colors hover:border-emerald-400/60 hover:bg-emerald-400/20',
+                'outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60',
+              )}
+            >
+              <ArrowUpRight className="size-3.5" />
+              opportunity
+            </Link>
+          )}
         </span>
       </div>
 
@@ -274,6 +596,8 @@ export function SignalsPage() {
   const [disposition, setDisposition] = useState<SignalDisposition | ''>('')
   const [signalType, setSignalType] = useState<SignalType | ''>('')
   const [formOpen, setFormOpen] = useState(false)
+  /** Signal queued for the promote dialog (T1.12). */
+  const [promoting, setPromoting] = useState<Signal | null>(null)
 
   const params = {
     disposition: disposition || undefined,
@@ -290,15 +614,9 @@ export function SignalsPage() {
     mutationFn: ({ id, next }: { id: string; next: SignalDisposition }) =>
       updateSignalDisposition(id, next),
     onSuccess: (s) => {
-      if (s.status === 'PROMOTED') {
-        toast.success('Promoted to opportunity', {
-          description: 'Full promote flow (typed payload + graph edges) arrives in Phase 1.',
-        })
-      } else {
-        toast.info(`Signal ${String(s.status).toLowerCase()}`, {
-          description: s.name ?? 'Signal updated.',
-        })
-      }
+      toast.info(`Signal ${String(s.status).toLowerCase()}`, {
+        description: s.name ?? 'Signal updated.',
+      })
       void queryClient.invalidateQueries({ queryKey: ['signals'] })
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
@@ -310,6 +628,16 @@ export function SignalsPage() {
   const items = data?.items ?? []
   const total = data?.total ?? 0
   const newCount = items.filter((s) => s.status === 'NEW').length
+
+  const onDisposition = (id: string, next: SignalDisposition): void => {
+    if (next === 'PROMOTED') {
+      // Open the promote dialog instead of the bare disposition flip (T1.12).
+      const target = items.find((s) => s.id === id)
+      if (target) setPromoting(target)
+      return
+    }
+    dispositionMutation.mutate({ id, next })
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -396,11 +724,14 @@ export function SignalsPage() {
             <SignalRow
               key={s.id}
               s={s}
-              onDisposition={(id, next) => dispositionMutation.mutate({ id, next })}
+              onDisposition={onDisposition}
             />
           ))}
         </Card>
       )}
+
+      {/* Promote dialog (T1.12) */}
+      {promoting && <PromoteDialog signal={promoting} onClose={() => setPromoting(null)} />}
     </div>
   )
 }

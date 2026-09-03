@@ -51,9 +51,12 @@ export interface DuplicateEntry {
   /**
    * 'batch' = duplicate within this import run (default, may be omitted);
    * 'existing' = matched an OPPORTUNITY already in the graph — skipped and merged
-   * into it instead of creating a new node (idempotent re-import, T1.2).
+   * into it instead of creating a new node (idempotent re-import, T1.2);
+   * 'linked' = cross-file near-duplicate (same company+role, different channel)
+   * within this run — not persisted as its own node; linked onto the kept
+   * opportunity via an "Also seen via …" provenance note (T1.2).
    */
-  reason?: 'batch' | 'existing';
+  reason?: 'batch' | 'existing' | 'linked';
 }
 
 export interface FileReport {

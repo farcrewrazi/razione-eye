@@ -80,6 +80,10 @@ export const TASK_STATUSES = ['TODO', 'IN_PROGRESS', 'DONE', 'CANCELLED'] as con
 
 export const TASK_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH'] as const
 
+export const GATE_ACTION_TYPES = ['apply_to_job'] as const
+export const GATE_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const
+export const GATE_DECISIONS = ['approved', 'edited_approved', 'rejected'] as const
+
 export const AGENT_KINDS = ['native', 'adapter'] as const
 export const AGENT_CAPABILITIES = ['discover', 'analyze', 'rank', 'prepare', 'draft', 'suggest'] as const
 export const AGENT_SCHEDULES = ['on_demand', 'cron'] as const
@@ -113,6 +117,9 @@ export type AgentKind = (typeof AGENT_KINDS)[number]
 export type AgentCapability = (typeof AGENT_CAPABILITIES)[number]
 export type AgentSchedule = (typeof AGENT_SCHEDULES)[number]
 export type AgentRunStatus = (typeof AGENT_RUN_STATUSES)[number]
+export type GateActionType = (typeof GATE_ACTION_TYPES)[number]
+export type GateStatus = (typeof GATE_STATUSES)[number]
+export type GateDecision = (typeof GATE_DECISIONS)[number]
 
 // ─── Shared primitives ───────────────────────────────────────────────────────
 
@@ -151,6 +158,12 @@ export interface Matching {
   salary?: number
   career_upside?: number
 }
+
+/** [W3] company-vs-role split — Job Analyst writes `data.dimensions` (contract §2/§5). */
+export interface MatchingDimensions {
+  role_dimension?: number
+  company_dimension?: number
+}
 export interface Contact {
   recruiter?: string
   linkedin?: string
@@ -159,7 +172,8 @@ export interface Contact {
 
 export interface NextAction {
   type: string
-  due: string
+  /** ISO date or timestamp; may be null on hand-written entries (contract §6). */
+  due: string | null
 }
 
 export interface OpportunityData {
@@ -172,8 +186,12 @@ export interface OpportunityData {
   salary_max?: number
   match_score?: number
   matching?: Matching
+  /** [W3] role/company dimension split (Job Analyst). Optional — hand-written entries omit it. */
+  dimensions?: MatchingDimensions
   contact?: Contact
   next_action?: NextAction
+  /** [W4] ISO date (YYYY-MM-DD) — written when the gate approves the apply. */
+  applied_date?: string
   problems_detected?: string[]
   suggested_offer?: unknown
   [key: string]: unknown // permissive for WEBSITE/CONSULTANCY/AFFILIATE/CRYPTO
@@ -343,14 +361,9 @@ export interface DashboardGemsAggregate {
   passed_filter: number
 }
 
-export interface DashboardActionsRequiredAggregate {
-  overdue_tasks: number
-  stale_opportunities: number
-  unanswered_recruiters: number
-}
-
 export interface DashboardTodayAggregate {
-  actions_required: DashboardActionsRequiredAggregate
+  /** Open TASKs due ≤ today + JOB opps with next_action.due ≤ today (contract §4). */
+  actions_required: number
   career: DashboardCareerAggregate
   business: DashboardBusinessAggregate
   affiliate: DashboardAffiliateAggregate
@@ -363,31 +376,58 @@ export interface DashboardAggregate {
   next_best_action: NextBestAction | null
 }
 
+/** NBA wire shape (contract §4 [W3]) — all fields nullable, null object = nothing to do. */
 export interface NextBestAction {
-  opportunity: Opportunity
-  reason: string
-  match_score: number
+  opportunity: Opportunity | null
+  reason: string | null
+  match_score: number | null
 }
 
+// ─── Daily Brief (contract §4 [W4], T1.10) ───────────────────────────────────
+
+/** One ranked morning priority — explicit opportunity ref (no FE text-matching). */
 export interface BriefPriority {
-  title: string
-  context: string
+  opportunity_id: string
+  role: string | null
+  company: string | null
+  score: number | null
+  band: ScoreBand
+  next_action: { type: string; due: string | null } | null
 }
 
-export interface BriefCounts {
-  completed: number
+export interface MorningBriefCounts {
+  /** Open tasks due ≤ today + opps due ≤ today + pending gate approvals. */
+  actions_required: number
+  gate_pending: number
+  overdue_tasks: number
+  career: DashboardCareerAggregate
+  business: { discovered: number }
+  affiliate: { content_opportunities: number }
+  gems: { tokens_detected: number }
+}
+
+export interface MorningBrief {
+  kind: 'morning'
+  date: string // YYYY-MM-DD
+  counts: MorningBriefCounts
+  priorities: BriefPriority[] // top 3–5, ranked by score then soonest due
+  next_best_action: NextBestAction | null
+}
+
+export interface EveningBrief {
+  kind: 'evening'
+  date: string
+  /** Tasks DONE today + gate-approved apply actions today. */
+  completed_today: number
+  /** Open tasks (any due) + opps still awaiting action. */
   pending: number
-  new: number
+  new_today: { opportunities: number; signals: number }
+  gate_decisions_today: number
+  observation: string
+  recommendation: string
 }
 
-export interface Brief {
-  slot: 'morning' | 'evening'
-  date: string // ISO date (YYYY-MM-DD)
-  priorities: BriefPriority[]
-  counts: BriefCounts
-  observation: string
-  observation_recommendation: string
-}
+export type Brief = MorningBrief | EveningBrief
 
 // ─── Convenience aliases (typed node views) ───────────────────────────────────
 
@@ -426,6 +466,65 @@ export interface CreateSignalInput {
   name?: string
   tags?: string[]
   notes?: Note[]
+}
+
+/** POST /api/opportunities body (contract §4 — createOpportunitySchema is .strict()). */
+export interface CreateOpportunityInput {
+  opportunity_type: OpportunityType
+  status?: string
+  /** JOB payload (contract §2) — re-validated server-side; other types permissive. */
+  data: Record<string, unknown>
+  name?: string
+  source?: string
+  tags?: string[]
+  notes?: Note[]
+  due_at?: string | null
+  score?: number | null
+  /** T1.1.6-BE (W3) link-back: marks the referenced SIGNAL PROMOTED with promoted_to. */
+  signal_id?: string
+}
+
+/**
+ * FE-facing manual JOB entry (T1.1.6-FE) — `createOpportunity()` input.
+ * Company is FE-level: mock mode find-or-creates + links a COMPANY node; real
+ * mode sends the contract body (company linking arrives with the real
+ * integration — until then the company name rides along as a note).
+ */
+export interface CreateManualJobInput {
+  company: string
+  role: string
+  location?: string
+  salary?: string
+  url?: string
+  stack?: string[]
+  source?: string
+  notes?: string
+  /** ISO date — mock mode anchors created_at to it. */
+  discovered_at?: string
+  signal_id?: string
+}
+
+/**
+ * FE-facing promote payload (T1.12) — `promoteSignal()` input. Mirrors the
+ * contract's promote body plus a FE-level `company` (mock find-or-creates +
+ * links a COMPANY node; real mode sends it as a note — not in the contract
+ * promote body yet, same convention as CreateManualJobInput).
+ */
+export interface PromoteSignalData {
+  company?: string
+  role?: string
+  location?: string
+  salary?: string
+  url?: string
+  stack?: string[]
+  notes?: string
+}
+
+/** POST /api/signals/:id/promote response (contract §4 [W3]). */
+export interface PromoteSignalResult {
+  signal: Signal
+  /** Includes computed `band`. */
+  opportunity: Opportunity
 }
 
 export interface CreateTaskInput {
@@ -476,6 +575,70 @@ export interface ListTasksParams {
   sort?: string
 }
 
+// ─── Action Gate (contract §4 [W4], T1.11) ───────────────────────────────────
+
+/** The prepared draft payload for `apply_to_job` — a ready-to-paste application kit. */
+export interface ApplyToJobPayload {
+  opportunity_id: string
+  /** Created (and set DONE) on approve when omitted. */
+  task_id?: string
+  cover_note?: string
+  resume_version?: string
+  apply_url?: string
+  notes?: string
+  [key: string]: unknown // schema is .passthrough()
+}
+
+/** One gate queue entry — decisions are FINAL (409 ALREADY_DECIDED on re-decide). */
+export interface GateAction {
+  id: string
+  action_type: GateActionType
+  status: GateStatus
+  opportunity_id: string | null
+  task_id: string | null
+  payload: ApplyToJobPayload
+  /** e.g. "Apply to Senior Backend Engineer — NexLabs". */
+  summary: string
+  created_at: string
+  decided_at: string | null
+  decision: GateDecision | null
+  decision_reason: string | null
+  /** Linked nodes, enriched on reads — updated opportunity/task after approve. */
+  opportunity: Opportunity | null
+  task: Task | null
+}
+
+export interface ListGateActionsParams {
+  status?: GateStatus
+  limit?: number
+  offset?: number
+}
+
+/** POST /api/gate/actions body (contract §4). */
+export interface CreateGateActionInput {
+  action_type: GateActionType
+  payload: ApplyToJobPayload
+  /** Top-level fallbacks when the payload omits them. */
+  opportunity_id?: string
+  task_id?: string
+}
+
+/** POST /api/gate/actions/:id/approve body — payload = edit-then-approve. */
+export interface ApproveGateActionInput {
+  payload?: Partial<ApplyToJobPayload>
+}
+
+/** POST /api/gate/actions/:id/approve response — executed nodes included. */
+export type ApproveGateActionResult = GateAction & {
+  opportunity: Opportunity
+  task: Task
+}
+
+/** POST /api/gate/actions/:id/reject body. */
+export interface RejectGateActionInput {
+  reason: string
+}
+
 // ─── Health (contract §4) ────────────────────────────────────────────────────
 
 export interface Health {
@@ -486,7 +649,13 @@ export interface Health {
 
 // ─── Error envelope (contract §0) ────────────────────────────────────────────
 
-export type ApiErrorCode = 'VALIDATION' | 'INVALID_STATUS' | 'BAD_QUERY' | 'NOT_FOUND' | 'INTERNAL'
+export type ApiErrorCode =
+  | 'VALIDATION'
+  | 'INVALID_STATUS'
+  | 'BAD_QUERY'
+  | 'NOT_FOUND'
+  | 'ALREADY_DECIDED' // [W4] gate action already decided — decisions are final
+  | 'INTERNAL'
 
 export interface ErrorEnvelope {
   error: {

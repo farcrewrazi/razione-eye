@@ -5,18 +5,20 @@
  * "What should Razi do next?"
  *
  * Homepage contract:
- *   Header — RAZIONE EYE — {Weekday} + date + ⚡ N actions required chip
- *   NEXT BEST ACTION — hero card (Review → detail · Apply → Action Gate toast)
+ *   Header — RAZIONE EYE — {Weekday} + date + ⚡ N actions required chip +
+ *            gate badge (N pending approvals → /gate)
+ *   NEXT BEST ACTION — hero card (Review → detail · Apply → submits a draft
+ *           apply_to_job action to the gate [T1.11])
  *   TODAY — per-eye rows (Career live; Business/Affiliate/Gems come online in
  *           Phases 3/4/5 and render dimmed with a phase tag)
  *   AGENTS — the six workers with status dot + last run
  */
 
-import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router'
-import { AlertTriangle, Crosshair, Zap } from 'lucide-react'
-import { getDashboard } from '@/api/provider'
-import type { DashboardAggregate, NextBestAction } from '@/api/types'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link, useNavigate } from 'react-router'
+import { AlertTriangle, CalendarClock, Crosshair, ShieldCheck, Zap } from 'lucide-react'
+import { createGateAction, getDashboard, listGateActions, listOpportunities } from '@/api/provider'
+import type { NextBestAction, Opportunity } from '@/api/types'
 import {
   AgentStatusDot,
   BandBadge,
@@ -26,7 +28,7 @@ import {
   StatusBadge,
 } from '@/components/common'
 import { Badge, Button, Card, Skeleton, useToast } from '@/components/ui'
-import { salaryLabel, timeAgo } from '@/lib/format'
+import { dueMeta, salaryLabel, timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 /* ─── TODAY row ─────────────────────────────────────────────────────────────── */
@@ -79,10 +81,20 @@ function TodayRow({
 
 /* ─── NEXT BEST ACTION hero ─────────────────────────────────────────────────── */
 
-function NextBestActionCard({ nba }: { nba: NextBestAction }) {
+function NextBestActionCard({
+  nba,
+  gatePendingForOpp,
+  submitting,
+  onSubmitToGate,
+}: {
+  nba: NextBestAction
+  gatePendingForOpp: boolean
+  submitting: boolean
+  onSubmitToGate: () => void
+}) {
   const navigate = useNavigate()
-  const { toast } = useToast()
   const o = nba.opportunity
+  if (!o) return null
   const meta = [o.data.location, salaryLabel(o.data)].filter(Boolean).join(' · ') || '—'
 
   return (
@@ -93,7 +105,7 @@ function NextBestActionCard({ nba }: { nba: NextBestAction }) {
       )}
     >
       <div className="flex flex-wrap items-center gap-6">
-        <ScoreDial value={nba.match_score} size={112} />
+        <ScoreDial value={nba.match_score ?? o.score} size={112} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-[10px] font-semibold tracking-[0.3em] text-[var(--color-accent)]">
@@ -111,19 +123,103 @@ function NextBestActionCard({ nba }: { nba: NextBestAction }) {
             <Button size="sm" onClick={() => void navigate(`/opportunities/${o.id}`)}>
               Review
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                toast.info('Action Gate arrives in Phase 1 — approval required before anything is sent')
-              }
-            >
-              Apply
-            </Button>
+            {gatePendingForOpp ? (
+              <Button size="sm" variant="outline" onClick={() => void navigate('/gate')}>
+                <ShieldCheck className="size-3.5" />
+                In Gate — review
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" disabled={submitting} onClick={onSubmitToGate}>
+                <ShieldCheck className="size-3.5" />
+                {submitting ? 'Submitting…' : 'Apply'}
+              </Button>
+            )}
           </div>
+          <p className="mt-2 font-mono text-[10px] tracking-wider text-[var(--color-muted)]/70">
+            APPLY SUBMITS A DRAFT TO THE ACTION GATE — NOTHING SENDS WITHOUT YOUR APPROVAL
+          </p>
         </div>
       </div>
     </Card>
+  )
+}
+
+/* ─── FOLLOW-UPS (T1.8-FE half) ─────────────────────────────────────────────── */
+
+/**
+ * Post-application follow-up reminders (T1.8): opportunities in the waiting
+ * stages (APPLIED → OFFER) with a due/overdue `next_action` — the "replies and
+ * follow-ups never slip" promise, visible on the dashboard.
+ */
+const FOLLOW_UP_STATUSES = ['APPLIED', 'RECRUITER_RESPONSE', 'INTERVIEW', 'OFFER']
+
+const followUpTone: Record<string, string> = {
+  overdue: 'border-red-400/40 bg-red-400/10 text-red-300',
+  soon: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
+  normal: 'border-[var(--color-border)] bg-white/[0.03] text-[var(--color-muted)]',
+}
+
+function FollowUpsSection({ opportunities }: { opportunities: Opportunity[] }) {
+  const followUps = opportunities
+    .filter((o) => o.status != null && FOLLOW_UP_STATUSES.includes(o.status))
+    .map((o) => ({ o, due: o.data.next_action?.due ? dueMeta(o.data.next_action.due) : null }))
+    // Urgent first: overdue → due soon → everything else; then by company/role for stability.
+    .sort((a, b) => {
+      const rank = { overdue: 0, soon: 1, normal: 2 } as const
+      const ra = a.due ? rank[a.due.tone] : 3
+      const rb = b.due ? rank[b.due.tone] : 3
+      if (ra !== rb) return ra - rb
+      return (a.o.company?.name ?? '').localeCompare(b.o.company?.name ?? '')
+    })
+    .slice(0, 5)
+
+  if (followUps.length === 0) return null
+
+  return (
+    <section className="flex flex-col gap-2">
+      <SectionHeader
+        title="FOLLOW-UPS"
+        subtitle="Applications awaiting a reply or next step"
+        right={
+          <Badge variant="outline" className="font-mono text-[10px] tracking-wider">
+            {followUps.length} TRACKING
+          </Badge>
+        }
+      />
+      <Card>
+        <div className="divide-y divide-[var(--color-border)]/60">
+          {followUps.map(({ o, due }) => (
+            <Link
+              key={o.id}
+              to={`/opportunities/${o.id}`}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 transition-colors hover:bg-[var(--color-accent)]/[0.05]"
+            >
+              <StatusBadge status={o.status} />
+              <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--color-text)]">
+                {o.data.role ?? o.name}
+                {o.company?.name && (
+                  <span className="text-[var(--color-muted)]"> — {o.company.name}</span>
+                )}
+              </span>
+              {o.data.applied_date && (
+                <span className="font-mono text-[10px] tracking-wider text-[var(--color-muted)] tabular-nums">
+                  APPLIED {o.data.applied_date}
+                </span>
+              )}
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[10px] tracking-wider whitespace-nowrap',
+                  due ? followUpTone[due.tone] : 'border-[var(--color-border)] bg-white/[0.03] text-[var(--color-muted)]',
+                )}
+              >
+                <CalendarClock className="size-3" />
+                {due?.label ?? 'no date'}
+              </span>
+            </Link>
+          ))}
+        </div>
+      </Card>
+    </section>
   )
 }
 
@@ -131,9 +227,45 @@ function NextBestActionCard({ nba }: { nba: NextBestAction }) {
 
 export function DashboardPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
   const { data, isPending, isError, error, refetch } = useQuery({
     queryKey: ['dashboard'],
     queryFn: getDashboard,
+  })
+
+  // Gate queue state — the header badge + NBA [Apply] button both use it.
+  const { data: gatePending } = useQuery({
+    queryKey: ['gate-pending'],
+    queryFn: () => listGateActions({ status: 'PENDING', limit: 50 }),
+    staleTime: 15_000,
+  })
+
+  // Follow-up tracker (T1.8) — opportunities in the post-application stages.
+  const { data: followUpJobs } = useQuery({
+    queryKey: ['opportunities', { followups: 'dashboard' }],
+    queryFn: () => listOpportunities({ type: 'JOB', limit: 200, sort: '-score' }),
+    staleTime: 30_000,
+  })
+
+  const submitToGate = useMutation({
+    mutationFn: (opportunityId: string) =>
+      createGateAction({
+        action_type: 'apply_to_job',
+        payload: { opportunity_id: opportunityId },
+      }),
+    onSuccess: (action) => {
+      toast.success('Draft submitted to the Action Gate', {
+        description: `${action.summary} — approve or edit it in the gate.`,
+      })
+      void queryClient.invalidateQueries({ queryKey: ['gate-actions'] })
+      void queryClient.invalidateQueries({ queryKey: ['gate-pending'] })
+      void queryClient.invalidateQueries({ queryKey: ['brief'] })
+      void navigate('/gate')
+    },
+    onError: (err) => {
+      toast.error('Could not submit to the gate', { description: err.message })
+    },
   })
 
   const now = new Date()
@@ -170,12 +302,12 @@ export function DashboardPage() {
     )
   }
 
-  const actions = data.today.actions_required
-  const count = actionCount(data.today)
-  const breakdown: string[] = []
-  if (actions.overdue_tasks > 0) breakdown.push(`${actions.overdue_tasks} overdue tasks`)
-  if (actions.stale_opportunities > 0) breakdown.push(`${actions.stale_opportunities} stale opportunities`)
-  if (actions.unanswered_recruiters > 0) breakdown.push(`${actions.unanswered_recruiters} unanswered recruiters`)
+  const count = data.today.actions_required
+  const gateCount = gatePending?.total ?? 0
+  const nba = data.next_best_action?.opportunity ? data.next_best_action : null
+  const nbaInGate =
+    nba?.opportunity != null &&
+    (gatePending?.items ?? []).some((a) => a.payload.opportunity_id === nba.opportunity?.id)
 
   return (
     <div className="flex flex-col gap-5">
@@ -190,22 +322,44 @@ export function DashboardPage() {
             {dateLine} · CONTROL EYE
           </p>
         </div>
-        <Badge
-          className={cn(
-            'gap-1.5 px-2 py-1 font-mono text-[11px] tracking-wider',
-            count > 0
-              ? 'border-amber-400/40 bg-amber-400/10 text-amber-300'
-              : 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
-          )}
-        >
-          <Zap className="size-3" />
-          {count} ACTION{count === 1 ? '' : 'S'} REQUIRED
-        </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge
+            className={cn(
+              'gap-1.5 px-2 py-1 font-mono text-[11px] tracking-wider',
+              count > 0
+                ? 'border-amber-400/40 bg-amber-400/10 text-amber-300'
+                : 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
+            )}
+          >
+            <Zap className="size-3" />
+            {count} ACTION{count === 1 ? '' : 'S'} REQUIRED
+          </Badge>
+          <Link to="/gate" className="transition-opacity hover:opacity-80">
+            <Badge
+              className={cn(
+                'gap-1.5 px-2 py-1 font-mono text-[11px] tracking-wider',
+                gateCount > 0
+                  ? 'border-amber-400/40 bg-amber-400/10 text-amber-300'
+                  : 'border-[var(--color-border)] text-[var(--color-muted)]',
+              )}
+            >
+              <ShieldCheck className="size-3" />
+              {gateCount} GATE PENDING
+            </Badge>
+          </Link>
+        </div>
       </header>
 
       {/* NEXT BEST ACTION — hero */}
-      {data.next_best_action ? (
-        <NextBestActionCard nba={data.next_best_action} />
+      {nba ? (
+        <NextBestActionCard
+          nba={nba}
+          gatePendingForOpp={nbaInGate}
+          submitting={submitToGate.isPending}
+          onSubmitToGate={() => {
+            if (nba.opportunity) submitToGate.mutate(nba.opportunity.id)
+          }}
+        />
       ) : (
         <EmptyState
           icon={<Crosshair />}
@@ -219,13 +373,16 @@ export function DashboardPage() {
         />
       )}
 
+      {/* FOLLOW-UPS — applications awaiting replies / next steps (T1.8) */}
+      <FollowUpsSection opportunities={followUpJobs?.items ?? []} />
+
       {/* TODAY */}
       <section className="flex flex-col gap-2">
         <SectionHeader
           title="TODAY"
           right={
             <span className="font-mono text-[11px] tracking-wider text-[var(--color-muted)] tabular-nums">
-              {breakdown.length > 0 ? breakdown.join(' · ') : 'NOTHING OVERDUE'}
+              {count > 0 ? 'SEE THE ACTION COUNT ABOVE' : 'NOTHING DUE'}
             </span>
           }
         />
@@ -300,11 +457,6 @@ export function DashboardPage() {
       </section>
     </div>
   )
-}
-
-function actionCount(t: DashboardAggregate['today']): number {
-  const a = t.actions_required
-  return a.overdue_tasks + a.stale_opportunities + a.unanswered_recruiters
 }
 
 export default DashboardPage

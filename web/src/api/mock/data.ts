@@ -9,11 +9,8 @@
 
 import type {
   Agent,
-  Brief,
   Company,
-  DashboardAggregate,
   Edge,
-  NextBestAction,
   Opportunity,
   OpportunityData,
   Person,
@@ -365,7 +362,10 @@ export const mockCompanies: Company[] = [
       size: '50-200',
       stack: ['Python', 'dbt', 'React', 'Snowflake'],
       location: 'Cyberjaya',
-      ai_culture_notes: ['Internal LLM platform for analytics copilots'],
+      ai_culture_notes: [
+        'Internal LLM platform for analytics copilots',
+        'GitHub Copilot seats for all engineers; prompt changes gated by eval suites',
+      ],
       website: 'https://dataharbor.example.com',
     },
     created_at: at(-55),
@@ -387,7 +387,7 @@ export const mockCompanies: Company[] = [
       size: '200-1000',
       stack: ['.NET', 'Angular', 'Azure'],
       location: 'Kuala Lumpur',
-      ai_culture_notes: ['Traditional process; AI usage limited to testing'],
+      ai_culture_notes: ['Traditional process; AI usage limited to testing', 'GenAI working group formed; adoption policy under review'],
       website: 'https://silverline.example.com',
     },
     created_at: at(-50),
@@ -453,7 +453,7 @@ export const mockCompanies: Company[] = [
       size: '50-200',
       stack: ['Go', 'TypeScript', 'Terraform', 'AWS'],
       location: 'Cyberjaya',
-      ai_culture_notes: ['Uses AI for infra codegen and incident summaries'],
+      ai_culture_notes: ['Uses AI for infra codegen and incident summaries', 'AI-tooling workshop in onboarding week'],
       website: 'https://orbitedge.example.com',
     },
     created_at: at(-35),
@@ -523,12 +523,25 @@ function job(partial: {
   url?: string
   contact?: OpportunityData['contact']
   next_action?: OpportunityData['next_action']
+  applied_date?: string
   problems_detected?: string[]
   tags?: string[]
   notes?: string[]
   source?: string
 }): Opportunity {
   const company = mockCompanies.find((c) => c.id === partial.companyId)
+  // Dimensions mirror the Job Analyst formula (contract §5): role = avg(role_match, salary,
+  // career_upside), company = avg(company_match, ai_culture, location). Only for analyzed
+  // jobs (matching present) — hand-written/manual entries legitimately omit them.
+  const m = partial.matching
+  const dimensions =
+    m && m.role_match != null && m.salary != null && m.career_upside != null &&
+    m.company_match != null && m.ai_culture != null && m.location != null
+      ? {
+          role_dimension: Math.round((m.role_match + m.salary + m.career_upside) / 3),
+          company_dimension: Math.round((m.company_match + m.ai_culture + m.location) / 3),
+        }
+      : undefined
   return {
     id: partial.id,
     type: 'OPPORTUNITY',
@@ -549,8 +562,10 @@ function job(partial: {
       salary_max: partial.salary_max,
       match_score: partial.score ?? undefined,
       matching: partial.matching,
+      ...(dimensions ? { dimensions } : {}),
       contact: partial.contact,
       next_action: partial.next_action,
+      ...(partial.applied_date ? { applied_date: partial.applied_date } : {}),
       problems_detected: partial.problems_detected,
       company_id: partial.companyId,
     },
@@ -664,6 +679,7 @@ export const mockOpportunities: Opportunity[] = [
     salary_min: 12000,
     salary_max: 16000,
     contact: { linkedin: 'https://www.linkedin.com/in/orbitedge-hr-example' },
+    applied_date: '2026-08-24',
     tags: ['job', 'applied'],
   }),
   // ARCHIVE band (<60)
@@ -1074,6 +1090,28 @@ export const mockTasks: Task[] = [
     description: 'PHP stack — decided to skip after all.',
     tags: ['task'],
   }),
+  // Created + set DONE by the Action Gate approve (GA3 — Orbit Edge apply).
+  {
+    id: '01JDYTASK0000000000000009',
+    type: 'TASK',
+    name: 'Apply to Senior Software Engineer',
+    status: 'DONE',
+    opportunity_type: null,
+    score: null,
+    due_at: null,
+    source: 'gate',
+    tags: ['gate', 'apply'],
+    notes: [],
+    data: {
+      title: 'Apply to Senior Software Engineer',
+      description: 'Prepared and approved through the Action Gate',
+      opportunity_id: '01JDYJOB0000000000000006',
+      priority: 'HIGH',
+      completed_at: at(-9, 2),
+    },
+    created_at: at(-9, 2),
+    updated_at: at(-9, 2),
+  },
 ]
 
 // ─── Edges (graph links used by detail views) ─────────────────────────────────
@@ -1115,71 +1153,3 @@ export const mockEdges: Edge[] = mockOpportunities.flatMap((o) => {
   return edges
 })
 
-// ─── FE-owned aggregates ──────────────────────────────────────────────────────
-
-export const mockNextBestAction: NextBestAction = {
-  opportunity: mockOpportunities[0],
-  reason:
-    '91% match — role, stack and AI culture all align. Posting is 3 days old and recruiter Aisyah Rahman is active. Apply today.',
-  match_score: 91,
-}
-
-export const mockDashboardAggregate: DashboardAggregate = {
-  today: {
-    actions_required: {
-      overdue_tasks: 2,
-      stale_opportunities: 1,
-      unanswered_recruiters: 1,
-    },
-    career: {
-      new_jobs: 4,
-      high_match: 5,
-      pending_applications: 4,
-      recruiters_awaiting: 1,
-    },
-    business: {
-      discovered: 2,
-      worth_approaching: 1,
-      teasers_ready: 1,
-    },
-    affiliate: {
-      content_opportunities: 2,
-      scheduled: 1,
-    },
-    gems: {
-      tokens_detected: 1,
-      passed_filter: 1,
-    },
-  },
-  agents: mockAgents,
-  next_best_action: mockNextBestAction,
-}
-
-export const mockBriefs: Brief[] = [
-  {
-    slot: 'morning',
-    date: '2026-09-02',
-    priorities: [
-      { title: 'Apply to ABC Technology', context: 'Senior Full-Stack Engineer · 91% match · recruiter active' },
-      { title: 'Reply to Daniel Wong', context: 'CyberForge lead — overdue since yesterday' },
-      { title: 'Prep Nexa Labs system design', context: 'Round 2 interview in 2 days — multi-agent orchestration' },
-    ],
-    counts: { completed: 1, pending: 6, new: 3 },
-    observation:
-      'The ABC Technology posting is 3 days old with a 91% match — the strongest card this week, and its window is closing.',
-    observation_recommendation: 'Block 60 minutes this morning to apply before the recruiter pipeline fills.',
-  },
-  {
-    slot: 'evening',
-    date: '2026-09-02',
-    priorities: [
-      { title: 'Finish PixelPine teaser draft', context: 'Overdue by 2 days — 3-paragraph automation pitch' },
-      { title: 'Check Signal Watcher digest', context: '4 new signals today incl. 1 gem call (RAZIS)' },
-      { title: 'Confirm FiberPeak offer counter', context: 'Respond by Friday — counter for 2 remote days' },
-    ],
-    counts: { completed: 1, pending: 6, new: 3 },
-    observation:
-      'One business teaser is slipping (PixelPine, 2 days overdue) while the affiliate queue stays light — worth clearing tonight.',
-    observation_recommendation: 'Spend 30 minutes tonight finishing the PixelPine teaser and schedule it for tomorrow.',
-  },
-]

@@ -1,23 +1,64 @@
 /**
  * Companies — the company graph as a responsive card grid (docs/01 §6 module 5).
  *
- * Each card: name, industry + size, stack chips, location, ai_culture_notes
- * as subtle lines, website link. Click → /companies/:id detail.
+ * Each card: name, industry + size, stack chips, location, open-roles/avg-score
+ * stat row, ai_culture_notes as subtle lines, website link. Click →
+ * /companies/:id detail. Sort: most open roles (default) / name / avg score.
  */
 
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import { AlertTriangle, Building2, ExternalLink, MapPin, Search, Sparkles } from 'lucide-react'
-import { listCompanies } from '@/api/provider'
-import type { Company } from '@/api/types'
+import { listCompanies, listOpportunities } from '@/api/provider'
+import { JOB_TERMINAL_STATUSES } from '@/api/types'
+import type { Company, Opportunity } from '@/api/types'
 import { EmptyState, PageHeader } from '@/components/common'
-import { Badge, Button, Card, Input, Skeleton } from '@/components/ui'
+import { Badge, Button, Card, Input, Select, Skeleton } from '@/components/ui'
+import { scoreColor } from '@/lib/format'
 import { cn } from '@/lib/utils'
+
+/* ─── Per-company stats (derived client-side) ───────────────────────────────── */
+
+interface CompanyStats {
+  /** Linked opportunities with non-terminal status. */
+  open: number
+  /** Mean score across scored opportunities; null when none scored. */
+  avgScore: number | null
+}
+
+/** Open count + average score per company id, derived from the JOB pipeline. */
+function deriveCompanyStats(jobs: Opportunity[]): Map<string, CompanyStats> {
+  const acc = new Map<string, { open: number; scoreSum: number; scored: number }>()
+  for (const o of jobs) {
+    const companyId = o.data.company_id
+    if (typeof companyId !== 'string') continue
+    const s = acc.get(companyId) ?? { open: 0, scoreSum: 0, scored: 0 }
+    if (o.status != null && !(JOB_TERMINAL_STATUSES as readonly string[]).includes(o.status)) s.open += 1
+    if (o.score != null) {
+      s.scoreSum += o.score
+      s.scored += 1
+    }
+    acc.set(companyId, s)
+  }
+  const out = new Map<string, CompanyStats>()
+  for (const [id, s] of acc) {
+    out.set(id, { open: s.open, avgScore: s.scored > 0 ? Math.round(s.scoreSum / s.scored) : null })
+  }
+  return out
+}
 
 /* ─── Card ──────────────────────────────────────────────────────────────────── */
 
-function CompanyCard({ c, onOpen }: { c: Company; onOpen: (id: string) => void }) {
+function CompanyCard({
+  c,
+  stats,
+  onOpen,
+}: {
+  c: Company
+  stats?: CompanyStats
+  onOpen: (id: string) => void
+}) {
   const d = c.data
   const meta = [d.industry, d.size].filter(Boolean).join(' · ') || '—'
 
@@ -82,6 +123,30 @@ function CompanyCard({ c, onOpen }: { c: Company; onOpen: (id: string) => void }
         )}
       </div>
 
+      {/* Stat row — open roles + average score */}
+      <div className="flex items-center gap-3 border-t border-[var(--color-border)]/50 pt-2.5 text-xs">
+        <span className="inline-flex items-center gap-1.5 text-[var(--color-muted)]">
+          <span
+            className={cn(
+              'font-mono text-sm font-semibold tabular-nums',
+              stats && stats.open > 0 ? 'text-[var(--color-text)]' : 'text-[var(--color-muted)]/60',
+            )}
+          >
+            {stats ? stats.open : '—'}
+          </span>
+          open
+        </span>
+        <span className="inline-flex items-center gap-1.5 text-[var(--color-muted)]">
+          <span
+            className="font-mono text-sm font-semibold tabular-nums"
+            style={stats?.avgScore != null ? { color: scoreColor(stats.avgScore) } : { color: 'var(--color-muted)' }}
+          >
+            {stats?.avgScore != null ? stats.avgScore : '—'}
+          </span>
+          avg
+        </span>
+      </div>
+
       {/* AI culture notes — subtle lines */}
       {d.ai_culture_notes && d.ai_culture_notes.length > 0 && (
         <div className="mt-auto flex flex-col gap-1 border-t border-[var(--color-border)]/50 pt-2.5">
@@ -99,9 +164,18 @@ function CompanyCard({ c, onOpen }: { c: Company; onOpen: (id: string) => void }
 
 /* ─── Page ──────────────────────────────────────────────────────────────────── */
 
+/** Sort modes — default Most open. */
+type CompanySort = 'open' | 'name' | 'avg'
+const SORT_LABELS: Record<CompanySort, string> = {
+  open: 'Most open roles',
+  name: 'Name (A–Z)',
+  avg: 'Highest avg score',
+}
+
 export function CompaniesPage() {
   const navigate = useNavigate()
   const [q, setQ] = useState('')
+  const [sort, setSort] = useState<CompanySort>('open')
 
   // Debounced search — same pattern as the pipeline table.
   const [qInput, setQInput] = useState('')
@@ -119,8 +193,27 @@ export function CompaniesPage() {
     placeholderData: (prev) => prev,
   })
 
+  // Stats source — all JOB opportunities (open count + avg score per company).
+  const { data: jobs } = useQuery({
+    queryKey: ['companies-stats', 'jobs'],
+    queryFn: () => listOpportunities({ type: 'JOB', limit: 500 }),
+    placeholderData: (prev) => prev,
+  })
+  const stats = useMemo(() => deriveCompanyStats(jobs?.items ?? []), [jobs])
+
   const open = (id: string): void => void navigate(`/companies/${id}`)
-  const items = data?.items ?? []
+  const items = useMemo(() => {
+    const list = data?.items ?? []
+    const sorted = [...list]
+    if (sort === 'name') {
+      sorted.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
+    } else if (sort === 'avg') {
+      sorted.sort((a, b) => (stats.get(b.id)?.avgScore ?? -1) - (stats.get(a.id)?.avgScore ?? -1))
+    } else {
+      sorted.sort((a, b) => (stats.get(b.id)?.open ?? 0) - (stats.get(a.id)?.open ?? 0))
+    }
+    return sorted
+  }, [data, sort, stats])
   const total = data?.total ?? 0
 
   return (
@@ -135,16 +228,30 @@ export function CompaniesPage() {
         }
       />
 
-      {/* Search */}
-      <div className="relative max-w-md flex-1">
-        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-[var(--color-muted)]" />
-        <Input
-          className="pl-8"
-          placeholder="Search company, industry, location…"
-          value={qInput}
-          onChange={(e) => onSearchInput(e.target.value)}
-          aria-label="Search companies"
-        />
+      {/* Search + sort */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-56 flex-1">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-[var(--color-muted)]" />
+          <Input
+            className="pl-8"
+            placeholder="Search company, industry, location…"
+            value={qInput}
+            onChange={(e) => onSearchInput(e.target.value)}
+            aria-label="Search companies"
+          />
+        </div>
+        <Select
+          className="w-44"
+          value={sort}
+          onChange={(e) => setSort(e.target.value as CompanySort)}
+          aria-label="Sort companies"
+        >
+          {(Object.keys(SORT_LABELS) as CompanySort[]).map((key) => (
+            <option key={key} value={key}>
+              {SORT_LABELS[key]}
+            </option>
+          ))}
+        </Select>
       </div>
 
       {/* Grid */}
@@ -178,7 +285,7 @@ export function CompaniesPage() {
       ) : (
         <div className={cn('grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3', data?.items !== undefined && 'transition-opacity')}>
           {items.map((c) => (
-            <CompanyCard key={c.id} c={c} onOpen={open} />
+            <CompanyCard key={c.id} c={c} stats={stats.get(c.id)} onOpen={open} />
           ))}
         </div>
       )}

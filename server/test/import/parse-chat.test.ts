@@ -65,6 +65,22 @@ describe('parse-chat', () => {
     expect(records[0]).toMatchObject({ company: 'NexaCommerce', role: 'Senior Platform Engineer' });
   });
 
+  it('captures role-first entries (no company) so normalization flags the incomplete lead', () => {
+    const transcript = [
+      'Assistant: One partial lead:',
+      '',
+      '9. Backend Engineer (AI Platform) — Cyberjaya — RM12k-RM15k',
+      '   Source: LinkedIn',
+      '   Stack: Node.js, TypeScript',
+    ].join('\n');
+    const records = parseChat(transcript);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ role: 'Backend Engineer (AI Platform)', salary: 'RM12k-RM15k' });
+    expect(records[0]!['company']).toBeUndefined(); // flagged downstream — never guessed
+    // Location goes into notes for a role-first entry (no company to attach to).
+    expect(records[0]!['notes']).toContain('Cyberjaya');
+  });
+
   it('skips agent filler and never invents a job from noise', () => {
     const transcript = [
       'User: anything today?',

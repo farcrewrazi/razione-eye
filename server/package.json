@@ -7,9 +7,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "node src/scripts/dev.ts",
-    "seed": "node src/scripts/seed.ts",
-    "backup": "node src/scripts/backup.ts",
+    "dev": "node src/dev.ts",
+    "seed": "node src/seed.ts",
+    "backup": "node src/backup.ts",
+    "verify:import": "node src/import/verify.ts",
     "test": "vitest run",
     "build": "tsc -p tsconfig.json --noEmit"
   },

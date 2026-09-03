@@ -10,9 +10,14 @@ import { companiesRoute } from './companies.ts';
 import { signalsRoute } from './signals.ts';
 import { tasksRoute } from './tasks.ts';
 import { graphRoute } from './graph.ts';
+import { pipelineRoute } from './pipeline.ts';
+import { dashboardRoute } from './dashboard-routes.ts';
+import { gateRoute } from './gate.ts';
+import { morningBrief, eveningBrief } from './daily-brief.ts';
 import { importRoute } from './import/import-api.ts';
 import { runSeed } from './seed-service.ts';
 import { runBackup } from './backup-service.ts';
+import { getCtx } from './http-util.ts';
 
 export function createApp(db: DatabaseSync): { app: Hono; ctx: AppContext } {
   const ctx = makeContext(db);
@@ -48,7 +53,12 @@ export function createApp(db: DatabaseSync): { app: Hono; ctx: AppContext } {
     .route('/signals', signalsRoute)
     .route('/tasks', tasksRoute)
     .route('/graph', graphRoute)
+    .route('/pipeline', pipelineRoute)
+    .route('/', dashboardRoute)
     .route('/import', importRoute)
+    .route('/gate', gateRoute)
+    .get('/daily-brief/morning', (c) => c.json(morningBrief(getCtx(c))))
+    .get('/daily-brief/evening', (c) => c.json(eveningBrief(getCtx(c))))
     .post('/seed', (c) => c.json(runSeed(ctx)))
     .post('/backup', (c) => c.json(runBackup(ctx.db)));
 

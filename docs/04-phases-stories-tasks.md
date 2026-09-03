@@ -26,18 +26,18 @@
 
 ### Tasks
 
-- [ ] T0.1 `[BE]` Decide storage engine + graph approach (close D-004; options in [01-system-structure.md §3.4](01-system-structure.md))
-- [ ] T0.2 `[BE+FE]` Scaffold repo: app skeleton, config, seed script
-- [ ] T0.3 `[BE]` Implement the 8 core objects + common fields ([02-data-model.md §1](02-data-model.md))
-- [ ] T0.4 `[BE]` Implement graph edges — at minimum: `knows`, `located_in`, `hiring`, `belongs_to`, `matches`, `has_problem`, `solved_by` ([02-data-model.md §5](02-data-model.md))
-- [ ] T0.5 `[BE]` Implement the OPPORTUNITY type system (JOB / WEBSITE / CONSULTANCY / AFFILIATE / CRYPTO)
-- [ ] T0.6 `[BE]` Implement the SIGNAL object + disposition states (NEW / PROMOTED / DISMISSED / DUPLICATE)
-- [ ] T0.7 `[BE]` Implement the TASK object with due dates + status
-- [ ] T0.8 `[BE+FE]` Razi Profile (the Farcrew Razi `PERSON` node): full name, skills, seniority, salary band, location (Cyberjaya), AI-culture preferences
-- [ ] T0.8b `[BE]` Seed **RaziSurf** as a `COMPANY` node + `Farcrew Razi ── owns ──► RaziSurf` edge — the business entity behind all Business Eye work ([02-data-model.md §5](02-data-model.md))
-- [ ] T0.9 `[FE]` Dashboard shell: navigation for the 7 v0.1 modules ([01-system-structure.md §6](01-system-structure.md))
-- [ ] T0.10 `[BE]` Agent registry (name, capability, kind, schedule, last run) — stub entries for the six starter agents
-- [ ] T0.11 `[BE]` Backup/snapshot routine (career data is irreplaceable)
+- [x] T0.1 `[BE]` Decide storage engine + graph approach (close D-004; options in [01-system-structure.md §3.4](01-system-structure.md)) — SQLite property graph
+- [x] T0.2 `[BE+FE]` Scaffold repo: app skeleton, config, seed script
+- [x] T0.3 `[BE]` Implement the 8 core objects + common fields ([02-data-model.md §1](02-data-model.md))
+- [x] T0.4 `[BE]` Implement graph edges — at minimum: `knows`, `located_in`, `hiring`, `belongs_to`, `matches`, `has_problem`, `solved_by` ([02-data-model.md §5](02-data-model.md))
+- [x] T0.5 `[BE]` Implement the OPPORTUNITY type system (JOB / WEBSITE / CONSULTANCY / AFFILIATE / CRYPTO)
+- [x] T0.6 `[BE]` Implement the SIGNAL object + disposition states (NEW / PROMOTED / DISMISSED / DUPLICATE)
+- [x] T0.7 `[BE]` Implement the TASK object with due dates + status
+- [x] T0.8 `[BE+FE]` Razi Profile (the Farcrew Razi `PERSON` node): full name, skills, seniority, salary band, location (Cyberjaya), AI-culture preferences
+- [x] T0.8b `[BE]` Seed **RaziSurf** as a `COMPANY` node + `Farcrew Razi ── owns ──► RaziSurf` edge — the business entity behind all Business Eye work ([02-data-model.md §5](02-data-model.md))
+- [x] T0.9 `[FE]` Dashboard shell: navigation for the 7 v0.1 modules ([01-system-structure.md §6](01-system-structure.md))
+- [x] T0.10 `[BE]` Agent registry (name, capability, kind, schedule, last run) — stub entries for the six starter agents
+- [x] T0.11 `[BE]` Backup/snapshot routine (career data is irreplaceable)
 
 ### Exit criteria
 
@@ -67,32 +67,32 @@
 
 ### Tasks
 
-- [ ] T1.1 `[BE]` Build the **import pipeline** for mixed formats (D-003):
-  - [ ] T1.1.1 `[BE]` JSON/CSV importer (mapping to Opportunity Node schema)
-  - [ ] T1.1.2 `[BE]` Markdown/notes importer (semi-structured parsing)
-  - [ ] T1.1.3 `[BE]` Agent-conversation export importer (extract job entries from chat logs)
-  - [ ] T1.1.4 `[BE]` **Normalization step**: all formats → unified Opportunity Node; flag incomplete records instead of guessing
-  - [ ] T1.1.5 `[BE]` Dedup pass (same company+role+source → keep richest, link duplicates)
-  - [ ] T1.1.6 `[FE]` Manual-entry form as the fallback for stragglers
-- [ ] T1.2 `[BE]` Import + verify the ~30 jobs (counts must reconcile: imported = 30 ± stragglers flagged)
-- [ ] T1.3 `[BE]` Job Analyst agent (native):
-  - [ ] T1.3.1 `[BE]` Extraction: company, role, location, salary, stack, source, URL, notes
-  - [ ] T1.3.2 `[BE]` Profile comparison across the 6 sub-scores ([02-data-model.md §6.1](02-data-model.md))
-  - [ ] T1.3.3 `[BE]` Separate company score vs role score
-  - [ ] T1.3.4 `[BE]` Band assignment (90–100 PRIORITY / 75–89 APPLY / 60–74 REVIEW / <60 ARCHIVE)
-  - [ ] T1.3.5 `[BE]` `next_action` generation with due dates
-- [ ] T1.4 `[BE]` Run analysis over all imported jobs → ranked pipeline
-- [ ] T1.5 `[FE]` Pipeline board UI with drag-between-stages + terminal states
-- [ ] T1.6 `[FE]` Opportunity detail view: scores, matching breakdown, notes, contact, activity log
-- [ ] T1.7 `[FE]` Companies screen: auto-created from job imports (stack, location, AI culture notes)
-- [ ] T1.8 `[BE+FE]` Application tracking: status transitions, applied-date, reply/interview logging, follow-up reminders
-- [ ] T1.9 `[FE]` Next Best Action widget (top-priority task with [Review] [Apply])
-- [ ] T1.10 `[BE+FE]` Daily Brief v1:
-  - [ ] T1.10.1 `[BE]` Morning: counts by eye + top 3–5 priorities
-  - [ ] T1.10.2 `[BE]` Evening: completed/pending/new + one AI observation + recommendation
-  - [ ] T1.10.3 `[FE]` Daily Brief screen + agent status rendering
-- [ ] T1.11 `[BE+FE]` Action Gate v1: apply-task flow = system prepares → Razi confirms → status updates (see [03-agents-and-gates.md §4](03-agents-and-gates.md))
-- [ ] T1.12 `[FE]` Signal inbox screen with manual entry + promote-to-opportunity action
+- [x] T1.1 `[BE]` Build the **import pipeline** for mixed formats (D-003):
+  - [x] T1.1.1 `[BE]` JSON/CSV importer (mapping to Opportunity Node schema)
+  - [x] T1.1.2 `[BE]` Markdown/notes importer (semi-structured parsing)
+  - [x] T1.1.3 `[BE]` Agent-conversation export importer (extract job entries from chat logs)
+  - [x] T1.1.4 `[BE]` **Normalization step**: all formats → unified Opportunity Node; flag incomplete records instead of guessing
+  - [x] T1.1.5 `[BE]` Dedup pass (same company+role+source → keep richest, link duplicates)
+  - [x] T1.1.6 `[FE]` Manual-entry form as the fallback for stragglers
+- [x] T1.2 `[BE]` Import + verify the ~30 jobs (pipeline proven with a 45-record corpus across JSON/CSV/MD/chat → 34 imported · 6 deduped · 5 flagged; swap in the real ~30 job files when ready)
+- [x] T1.3 `[BE]` Job Analyst agent (native):
+  - [x] T1.3.1 `[BE]` Extraction: company, role, location, salary, stack, source, URL, notes
+  - [x] T1.3.2 `[BE]` Profile comparison across the 6 sub-scores ([02-data-model.md §6.1](02-data-model.md))
+  - [x] T1.3.3 `[BE]` Separate company score vs role score
+  - [x] T1.3.4 `[BE]` Band assignment (90–100 PRIORITY / 75–89 APPLY / 60–74 REVIEW / <60 ARCHIVE)
+  - [x] T1.3.5 `[BE]` `next_action` generation with due dates
+- [x] T1.4 `[BE]` Run analysis over all imported jobs → ranked pipeline (end-to-end test: import → analyze → ranked output)
+- [x] T1.5 `[FE]` Pipeline board UI with drag-between-stages + terminal states
+- [x] T1.6 `[FE]` Opportunity detail view: scores, matching breakdown, notes, contact, activity log
+- [x] T1.7 `[FE]` Companies screen: auto-created from job imports (stack, location, AI culture notes)
+- [x] T1.8 `[BE+FE]` Application tracking: status transitions, applied-date, reply/interview logging, follow-up reminders
+- [x] T1.9 `[FE]` Next Best Action widget (top-priority task with [Review] [Apply])
+- [x] T1.10 `[BE+FE]` Daily Brief v1:
+  - [x] T1.10.1 `[BE]` Morning: counts by eye + top 3–5 priorities
+  - [x] T1.10.2 `[BE]` Evening: completed/pending/new + one AI observation + recommendation
+  - [x] T1.10.3 `[FE]` Daily Brief screen + agent status rendering
+- [x] T1.11 `[BE+FE]` Action Gate v1: apply-task flow = system prepares → Razi confirms → status updates (see [03-agents-and-gates.md §4](03-agents-and-gates.md))
+- [x] T1.12 `[FE]` Signal inbox screen with manual entry + promote-to-opportunity action
 
 ### Exit criteria
 

@@ -11,12 +11,12 @@
 
 import { get, patch, post, put } from './client'
 import { bandForScore } from './mock/band'
-import { deriveBriefs, deriveDashboard, deriveNextBestAction } from './mock/derive'
+import { deriveDashboard, deriveEveningBrief, deriveMorningBrief, deriveNextBestAction } from './mock/derive'
 import { deriveOpportunityEvents, recordMockEvent } from './mock/events'
+import { mockGateActions } from './mock/gate'
 import {
   MOCK_NOW,
   mockAgents,
-  mockBriefs,
   mockCompanies,
   mockEdges,
   mockOpportunities,
@@ -27,24 +27,36 @@ import {
 } from './mock/data'
 import type {
   Agent,
-  Brief,
+  ApproveGateActionResult,
+  ApproveGateActionInput,
   Company,
   CompanyDetail,
+  CreateGateActionInput,
+  CreateManualJobInput,
+  CreateOpportunityInput,
   CreateSignalInput,
   CreateTaskInput,
   DashboardAggregate,
+  EveningBrief,
   Event,
+  GateAction,
   Health,
   ListCompaniesParams,
   ListEventsParams,
+  ListGateActionsParams,
   ListOpportunitiesParams,
   ListSignalsParams,
   ListTasksParams,
+  MorningBrief,
   NextBestAction,
+  Note,
   Opportunity,
   OpportunityDetail,
   PatchTaskInput,
   Person,
+  PromoteSignalData,
+  PromoteSignalResult,
+  RejectGateActionInput,
   Signal,
   SignalDisposition,
   Task,
@@ -92,6 +104,7 @@ const db = {
   signals: clone(mockSignals),
   tasks: clone(mockTasks),
   edges: clone(mockEdges),
+  gateActions: clone(mockGateActions),
 }
 
 // ─── Shared mock helpers ─────────────────────────────────────────────────────
@@ -260,6 +273,43 @@ export async function patchOpportunityStatus(id: string, status: string): Promis
   return clone(withBand(opportunity))
 }
 
+/**
+ * PATCH /api/opportunities/:id — partial update (contract §4: any subset of
+ * the create fields, data is merged). FE uses: applied-date setter, reply/
+ * interview logging via data (T1.8).
+ */
+export async function patchOpportunity(
+  id: string,
+  input: Partial<Pick<CreateOpportunityInput, 'data' | 'name' | 'source' | 'tags' | 'score' | 'due_at'>>,
+): Promise<Opportunity> {
+  if (apiMode() === 'real') return patch<Opportunity>(`/api/opportunities/${id}`, input)
+  await delay()
+  const opportunity = db.opportunities.find((o) => o.id === id) ?? notFound(`opportunity ${id}`)
+  const now = new Date().toISOString()
+  const previousAppliedDate = opportunity.data.applied_date as string | undefined
+  if (input.data !== undefined) opportunity.data = { ...opportunity.data, ...input.data }
+  if (input.name !== undefined) opportunity.name = input.name
+  if (input.source !== undefined) opportunity.source = input.source
+  if (input.tags !== undefined) opportunity.tags = input.tags
+  if (input.score !== undefined) opportunity.score = input.score
+  if (input.due_at !== undefined) opportunity.due_at = input.due_at
+  opportunity.updated_at = now
+  // Applied-date tracking (T1.8) — log the change in the activity feed.
+  if (
+    input.data?.applied_date !== undefined &&
+    input.data.applied_date !== previousAppliedDate
+  ) {
+    recordMockEvent({
+      at: now,
+      type: 'note_added',
+      node_id: id,
+      summary: `Applied date set to ${String(input.data.applied_date) || '—'} (manual edit).`,
+      data: { applied_date: input.data.applied_date },
+    })
+  }
+  return clone(withBand(opportunity))
+}
+
 /** GET /api/opportunities/:id/events [W2] → { items: Event[], total } (newest first). */
 export async function getOpportunityEvents(
   id: string,
@@ -293,6 +343,150 @@ export async function appendOpportunityNote(id: string, text: string): Promise<O
     data: { text },
   })
   return clone(withBand(opportunity))
+}
+
+/**
+ * POST /api/opportunities — generic create (contract §4 body, verbatim).
+ * Real mode only; mock writes go through the typed manual-entry path below.
+ */
+export async function createOpportunity(input: CreateOpportunityInput): Promise<Opportunity> {
+  if (apiMode() === 'real') return post<Opportunity>('/api/opportunities', input)
+  throw new Error('Mock mode: use createOpportunity(input: CreateManualJobInput)')
+}
+
+/**
+ * Manual JOB entry (T1.1.6-FE) — the `/opportunities/new` form's save.
+ *
+ * Mock: find-or-create COMPANY by normalized name, create a JOB opportunity
+ * (status DISCOVERED, source default 'manual', score null, tags
+ * ['manual-entry']), link via a `belongs_to` edge + derived `company` field,
+ * then the T1.1.6-BE signal link-back semantics (PROMOTED + promoted_to +
+ * `signal_promoted` event) when signal_id is set. Records an
+ * `opportunity_created` event. Real: POST /api/opportunities per contract —
+ * company is NOT part of the contract data payload, so the company name rides
+ * along as a note until the real integration lands.
+ */
+export async function createManualJob(input: CreateManualJobInput): Promise<Opportunity> {
+  if (apiMode() === 'real') {
+    // Contract data has no company field; keep it in notes so the info isn't
+    // lost (BE company linking arrives with the real integration).
+    const notes: Note[] = []
+    if (input.notes?.trim()) notes.push({ text: input.notes.trim(), created_at: new Date().toISOString() })
+    notes.push({ text: `Company: ${input.company.trim()}`, created_at: new Date().toISOString() })
+    if (input.signal_id) {
+      notes.push({ text: `Created from signal ${input.signal_id}`, created_at: new Date().toISOString() })
+    }
+    const data: Record<string, unknown> = {
+      role: input.role.trim(),
+      ...(input.location?.trim() ? { location: input.location.trim() } : {}),
+      ...(input.salary?.trim() ? { salary: input.salary.trim() } : {}),
+      ...(input.url?.trim() ? { url: input.url.trim() } : {}),
+      ...(input.stack && input.stack.length > 0 ? { stack: input.stack } : {}),
+    }
+    return post<Opportunity>('/api/opportunities', {
+      opportunity_type: 'JOB',
+      data,
+      name: input.role.trim(),
+      source: input.source ?? 'manual',
+      notes,
+      signal_id: input.signal_id,
+    })
+  }
+
+  await delay()
+  const now = new Date().toISOString()
+  const company = findOrCreateCompany(input.company.trim(), input.source, now)
+  const discoveredAt = input.discovered_at ?? now
+  const notes: Note[] = input.notes?.trim()
+    ? [{ text: input.notes.trim(), created_at: now }]
+    : []
+
+  const opportunity: Opportunity = {
+    id: mockUlid('O'),
+    type: 'OPPORTUNITY',
+    name: input.role.trim(),
+    status: 'DISCOVERED',
+    opportunity_type: 'JOB',
+    score: null,
+    due_at: null,
+    source: input.source ?? 'manual',
+    tags: ['manual-entry'],
+    notes,
+    data: {
+      role: input.role.trim(),
+      ...(input.location?.trim() ? { location: input.location.trim() } : {}),
+      ...(input.salary?.trim() ? { salary: input.salary.trim() } : {}),
+      ...(input.url?.trim() ? { url: input.url.trim() } : {}),
+      ...(input.stack && input.stack.length > 0 ? { stack: input.stack } : {}),
+      company_id: company.id,
+    },
+    created_at: discoveredAt,
+    updated_at: now,
+    band: bandForScore(null),
+    company,
+  }
+  db.opportunities = [opportunity, ...db.opportunities]
+  // belongs_to link (mock dataset links via data.company_id + edge, mirroring
+  // the seed's belongs_to/hiring representation).
+  db.edges = [
+    ...db.edges,
+    {
+      id: mockUlid('E'),
+      from_id: opportunity.id,
+      to_id: company.id,
+      edge_type: 'belongs_to',
+      data: null,
+      created_at: now,
+    },
+  ]
+  recordMockEvent({
+    at: now,
+    type: 'opportunity_created',
+    node_id: opportunity.id,
+    summary: `${opportunity.name} created (DISCOVERED)`,
+    data: { status: 'DISCOVERED', opportunity_type: 'JOB', source: opportunity.source },
+  })
+  // T1.1.6-BE link-back (mirror): mark the signal PROMOTED + promoted_to.
+  if (input.signal_id) {
+    const signal = db.signals.find((s) => s.id === input.signal_id)
+    if (signal) {
+      signal.status = 'PROMOTED'
+      signal.updated_at = now
+      signal.data.promoted_to = opportunity.id
+      recordMockEvent({
+        at: now,
+        type: 'signal_promoted',
+        node_id: signal.id,
+        summary: `Signal promoted → opportunity ${opportunity.id} (manual entry link-back)`,
+        data: { from: 'NEW', to: 'PROMOTED', promoted_to: opportunity.id },
+      })
+    }
+  }
+  return clone(withBand(opportunity))
+}
+
+/** Find-or-create a COMPANY by normalized name (lowercased + whitespace-collapsed). */
+function findOrCreateCompany(name: string, source: string | undefined, now: string): Company {
+  const key = name.toLowerCase().replace(/\s+/g, ' ').trim()
+  const existing = db.companies.find((c) => (c.name ?? '').toLowerCase().replace(/\s+/g, ' ').trim() === key)
+  if (existing) return existing
+  const company: Company = {
+    id: mockUlid('C'),
+    type: 'COMPANY',
+    name,
+    status: null,
+    opportunity_type: null,
+    score: null,
+    due_at: null,
+    source: source ?? 'manual',
+    tags: ['manual-entry'],
+    notes: [],
+    data: {},
+    created_at: now,
+    updated_at: now,
+  }
+  db.companies = [...db.companies, company]
+  return company
 }
 
 // ─── Companies ───────────────────────────────────────────────────────────────
@@ -382,6 +576,121 @@ export async function updateSignalDisposition(id: string, disposition: SignalDis
   return clone(signal)
 }
 
+/** GET /api/signals/:id — used by the manual-entry form's ?from_signal prefill. */
+export async function getSignal(id: string): Promise<Signal> {
+  if (apiMode() === 'real') return get<Signal>(`/api/signals/${id}`)
+  await delay()
+  const signal = db.signals.find((s) => s.id === id) ?? notFound(`signal ${id}`)
+  return clone(signal)
+}
+
+/**
+ * Promote a signal into a JOB OPPORTUNITY (T1.12) — the Promote dialog's save.
+ *
+ * Real: POST /api/signals/:id/promote with the contract body `{ data }`
+ * (company isn't in the contract promote body — it rides along as a note,
+ * same convention as createManualJob). → 201 `{ signal, opportunity }`.
+ *
+ * Mock: idempotent (already-promoted → return the existing pair), find-or-create
+ * COMPANY by normalized name, create the JOB (status DISCOVERED, source =
+ * signal.source, tags ['promoted'], content excerpt as first note + provided
+ * notes, data.source_signal_id back-link), belongs_to edge, signal → PROMOTED +
+ * promoted_to, `signal_promoted` + `opportunity_created` events.
+ */
+export async function promoteSignal(id: string, data: PromoteSignalData = {}): Promise<PromoteSignalResult> {
+  if (apiMode() === 'real') {
+    const notes: Note[] = []
+    if (data.notes?.trim()) notes.push({ text: data.notes.trim(), created_at: new Date().toISOString() })
+    if (data.company?.trim()) notes.push({ text: `Company: ${data.company.trim()}`, created_at: new Date().toISOString() })
+    return post<PromoteSignalResult>(`/api/signals/${id}/promote`, {
+      data: {
+        ...(data.role?.trim() ? { role: data.role.trim() } : {}),
+        ...(data.location?.trim() ? { location: data.location.trim() } : {}),
+        ...(data.salary?.trim() ? { salary: data.salary.trim() } : {}),
+        ...(data.url?.trim() ? { url: data.url.trim() } : {}),
+        ...(data.stack && data.stack.length > 0 ? { stack: data.stack } : {}),
+        ...(notes.length > 0 ? { notes: notes.map((n) => (typeof n === 'string' ? n : n.text)) } : {}),
+      },
+    })
+  }
+
+  await delay()
+  const signal = db.signals.find((s) => s.id === id) ?? notFound(`signal ${id}`)
+
+  // Idempotent — already promoted → return the existing pair, no duplicate.
+  if (signal.status === 'PROMOTED' && typeof signal.data.promoted_to === 'string') {
+    const existing = db.opportunities.find((o) => o.id === signal.data.promoted_to)
+    if (existing) return clone({ signal, opportunity: withBand(existing) })
+  }
+
+  const now = new Date().toISOString()
+  const company = data.company?.trim() ? findOrCreateCompany(data.company.trim(), signal.source ?? undefined, now) : undefined
+
+  const contentExcerpt =
+    signal.data.content.length > 200 ? `${signal.data.content.slice(0, 200)}…` : signal.data.content
+  const notes: Note[] = [{ text: contentExcerpt, created_at: now }]
+  if (data.notes?.trim()) notes.push({ text: data.notes.trim(), created_at: now })
+
+  const opportunity: Opportunity = {
+    id: mockUlid('O'),
+    type: 'OPPORTUNITY',
+    name: data.role?.trim() || 'Untitled role',
+    status: 'DISCOVERED',
+    opportunity_type: 'JOB',
+    score: null,
+    due_at: null,
+    source: signal.source ?? 'manual',
+    tags: ['promoted'],
+    notes,
+    data: {
+      role: data.role?.trim() || 'Untitled role',
+      ...(data.location?.trim() ? { location: data.location.trim() } : {}),
+      ...(data.salary?.trim() ? { salary: data.salary.trim() } : {}),
+      ...(data.url?.trim() || signal.data.url ? { url: data.url?.trim() || signal.data.url } : {}),
+      ...(data.stack && data.stack.length > 0 ? { stack: data.stack } : {}),
+      source_signal_id: signal.id,
+      ...(company ? { company_id: company.id } : {}),
+    },
+    created_at: now,
+    updated_at: now,
+    band: bandForScore(null),
+    company,
+  }
+  db.opportunities = [opportunity, ...db.opportunities]
+  if (company) {
+    db.edges = [
+      ...db.edges,
+      {
+        id: mockUlid('E'),
+        from_id: opportunity.id,
+        to_id: company.id,
+        edge_type: 'belongs_to',
+        data: null,
+        created_at: now,
+      },
+    ]
+  }
+  recordMockEvent({
+    at: now,
+    type: 'opportunity_created',
+    node_id: opportunity.id,
+    summary: `Opportunity "${opportunity.name ?? opportunity.id}" created from signal (${signal.id})`,
+    data: { status: 'DISCOVERED', opportunity_type: 'JOB', source: opportunity.source, signal_id: signal.id },
+  })
+
+  signal.status = 'PROMOTED'
+  signal.updated_at = now
+  signal.data.promoted_to = opportunity.id
+  recordMockEvent({
+    at: now,
+    type: 'signal_promoted',
+    node_id: signal.id,
+    summary: `Signal promoted → opportunity ${opportunity.id}`,
+    data: { from: 'NEW', to: 'PROMOTED', promoted_to: opportunity.id },
+  })
+  return clone({ signal, opportunity: withBand(opportunity) })
+}
+
 // ─── Tasks ───────────────────────────────────────────────────────────────────
 
 export async function listTasks(
@@ -467,6 +776,240 @@ export async function patchTask(id: string, patchInput: PatchTaskInput): Promise
   return clone(task)
 }
 
+// ─── Action Gate (T1.11 [W4]) ────────────────────────────────────────────────
+//
+// The apply-task flow: a PENDING draft sits in the queue → approve (optionally
+// with an edited payload = edit-then-approve) or reject (reason REQUIRED).
+// Decisions are FINAL — mock mirrors the server's 409 ALREADY_DECIDED.
+//
+// Mock approve executes the same side-effects as the server: ensures the
+// "Apply to <role>" TASK exists and is DONE, moves the opportunity to APPLIED
+// with data.applied_date + a follow_up next_action (+7d, terminals untouched),
+// and records status_changed + gate_decision events.
+
+/** "Today" as an ISO date (YYYY-MM-DD) — server `nowIso().slice(0, 10)`. */
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function enrichGateAction(action: GateAction): GateAction {
+  const opportunity = action.opportunity_id
+    ? (db.opportunities.find((o) => o.id === action.opportunity_id) ?? null)
+    : null
+  const task = action.task_id ? (db.tasks.find((t) => t.id === action.task_id) ?? null) : null
+  return { ...action, opportunity, task }
+}
+
+/** "Apply to Senior Backend Engineer — DataHarbor" (mirrors server summaryFor). */
+function gateSummaryFor(opportunityId: string): string {
+  const o = db.opportunities.find((op) => op.id === opportunityId)
+  const role = o ? ((o.data.role as string | undefined) ?? o.name) : null
+  const company = o ? (o.company?.name ?? (o.data.company as string | undefined)) : null
+  const target = [role, company].filter((s) => typeof s === 'string' && s.trim() !== '').join(' — ')
+  return `Apply to ${target !== '' ? target : opportunityId}`
+}
+
+/** GET /api/gate/actions?status&limit&offset [W4] — the approval queue, newest first. */
+export async function listGateActions(
+  params: ListGateActionsParams = {},
+): Promise<{ items: GateAction[]; total: number }> {
+  if (apiMode() === 'real') {
+    const query = buildQuery({ status: params.status, limit: params.limit, offset: params.offset })
+    return get<{ items: GateAction[]; total: number }>(`/api/gate/actions${query}`)
+  }
+  await delay()
+  let items = [...db.gateActions]
+  if (params.status) items = items.filter((a) => a.status === params.status)
+  items.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
+  const total = items.length
+  return clone({ items: applyLimitOffset(items, params.limit, params.offset).map(enrichGateAction), total })
+}
+
+/**
+ * POST /api/gate/actions [W4] — submit a draft (PENDING). Mock validates that
+ * payload.opportunity_id resolves to an OPPORTUNITY (422 semantics on the
+ * server; NOT_FOUND-flavored error here) and stamps the summary.
+ */
+export async function createGateAction(input: CreateGateActionInput): Promise<GateAction> {
+  if (apiMode() === 'real') return post<GateAction>('/api/gate/actions', input)
+  await delay()
+  const opportunityId = input.payload.opportunity_id ?? input.opportunity_id
+  if (!opportunityId) throw new Error('VALIDATION: opportunity_id is required (in payload or top-level)')
+  const opportunity = db.opportunities.find((o) => o.id === opportunityId)
+  if (!opportunity) throw new Error(`VALIDATION: opportunity_id ${opportunityId} does not reference an OPPORTUNITY node`)
+  const taskId = input.payload.task_id ?? input.task_id
+  if (taskId && !db.tasks.some((t) => t.id === taskId)) {
+    throw new Error(`VALIDATION: task_id ${taskId} does not reference a TASK node`)
+  }
+
+  const now = new Date().toISOString()
+  const action: GateAction = {
+    id: mockUlid('G'),
+    action_type: input.action_type,
+    status: 'PENDING',
+    opportunity_id: opportunityId,
+    task_id: taskId ?? null,
+    payload: { ...input.payload, opportunity_id: opportunityId, ...(taskId ? { task_id: taskId } : {}) },
+    summary: gateSummaryFor(opportunityId),
+    created_at: now,
+    decided_at: null,
+    decision: null,
+    decision_reason: null,
+    opportunity: null,
+    task: null,
+  }
+  db.gateActions = [action, ...db.gateActions]
+  return clone(enrichGateAction(action))
+}
+
+/**
+ * POST /api/gate/actions/:id/approve [W4] — optional payload = edit-then-approve.
+ * Response carries the executed opportunity (APPLIED + applied_date) and the
+ * DONE task so callers can update local state without refetching.
+ */
+export async function approveGateAction(
+  id: string,
+  input: ApproveGateActionInput = {},
+): Promise<ApproveGateActionResult> {
+  if (apiMode() === 'real') {
+    return post<ApproveGateActionResult>(
+      `/api/gate/actions/${id}/approve`,
+      input.payload ? { payload: input.payload } : undefined,
+    )
+  }
+  await delay()
+  const action = db.gateActions.find((a) => a.id === id) ?? notFound(`gate action ${id}`)
+  if (action.status !== 'PENDING') {
+    throw new Error(`ALREADY_DECIDED: gate action already ${action.status.toLowerCase()} — decisions are final`)
+  }
+
+  const edited = input.payload !== undefined
+  if (edited) action.payload = { ...action.payload, ...input.payload }
+  const now = new Date().toISOString()
+  const today = todayIso()
+
+  const opportunity = db.opportunities.find((o) => o.id === action.opportunity_id)
+  if (!opportunity) throw new Error('VALIDATION: linked opportunity no longer exists')
+
+  // 1. Ensure the apply TASK exists and is DONE.
+  let task = action.task_id ? db.tasks.find((t) => t.id === action.task_id) : undefined
+  const role = (opportunity.data.role as string | undefined) ?? opportunity.name ?? 'role'
+  if (!task) {
+    task = {
+      id: mockUlid('T'),
+      type: 'TASK',
+      name: `Apply to ${role}`,
+      status: 'DONE',
+      opportunity_type: null,
+      score: null,
+      due_at: null,
+      source: 'gate',
+      tags: ['gate', 'apply'],
+      notes: [],
+      data: {
+        title: `Apply to ${role}`,
+        description: 'Prepared and approved through the Action Gate',
+        opportunity_id: opportunity.id,
+        priority: 'HIGH',
+        completed_at: now,
+      },
+      created_at: now,
+      updated_at: now,
+    }
+    db.tasks = [task, ...db.tasks]
+    db.edges = [
+      ...db.edges,
+      { id: mockUlid('E'), from_id: task.id, to_id: opportunity.id, edge_type: 'serves', data: null, created_at: now },
+    ]
+  } else {
+    task.status = 'DONE'
+    task.data = { ...task.data, completed_at: now }
+    task.updated_at = now
+  }
+  action.task_id = task.id
+
+  // 2. Opportunity → APPLIED with applied_date (terminals/HIRED stay untouched).
+  const TERMINAL = new Set(['REJECTED', 'IGNORED', 'NOT_SUITABLE', 'EXPIRED', 'HIRED'])
+  const previousStatus = opportunity.status
+  if (!TERMINAL.has(previousStatus ?? '') && previousStatus !== 'APPLIED') {
+    opportunity.status = 'APPLIED'
+    opportunity.data = {
+      ...opportunity.data,
+      applied_date: today,
+      next_action: { type: 'follow_up', due: new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10) },
+    }
+    opportunity.updated_at = now
+    recordMockEvent({
+      at: now,
+      type: 'status_changed',
+      node_id: opportunity.id,
+      summary: `"${opportunity.name ?? opportunity.id}": ${previousStatus} → APPLIED (Action Gate)`,
+      data: { from: previousStatus, to: 'APPLIED', gate_action_id: action.id, applied_date: today },
+    })
+  } else if (previousStatus === 'APPLIED' && opportunity.data.applied_date === undefined) {
+    opportunity.data = { ...opportunity.data, applied_date: today }
+    opportunity.updated_at = now
+  }
+
+  // 3. Stamp the decision + log it.
+  action.status = 'APPROVED'
+  action.decided_at = now
+  action.decision = edited ? 'edited_approved' : 'approved'
+  recordMockEvent({
+    at: now,
+    type: 'gate_decision',
+    node_id: opportunity.id,
+    summary: `Gate ${action.decision}: ${action.summary}`,
+    data: {
+      gate_action_id: action.id,
+      action_type: action.action_type,
+      decision: action.decision,
+      opportunity_id: opportunity.id,
+      task_id: task.id,
+      edited,
+    },
+  })
+
+  const decided = enrichGateAction(action)
+  return clone({
+    ...decided,
+    opportunity: { ...withBand(opportunity) },
+    task: clone(task),
+  })
+}
+
+/**
+ * POST /api/gate/actions/:id/reject [W4] — reason REQUIRED (feeds LEARN).
+ * No side-effects on the opportunity/task; records a gate_decision event.
+ */
+export async function rejectGateAction(id: string, input: RejectGateActionInput): Promise<GateAction> {
+  if (apiMode() === 'real') return post<GateAction>(`/api/gate/actions/${id}/reject`, { reason: input.reason })
+  await delay()
+  const action = db.gateActions.find((a) => a.id === id) ?? notFound(`gate action ${id}`)
+  if (action.status !== 'PENDING') {
+    throw new Error(`ALREADY_DECIDED: gate action already ${action.status.toLowerCase()} — decisions are final`)
+  }
+  const now = new Date().toISOString()
+  action.status = 'REJECTED'
+  action.decided_at = now
+  action.decision = 'rejected'
+  action.decision_reason = input.reason
+  recordMockEvent({
+    at: now,
+    type: 'gate_decision',
+    node_id: action.opportunity_id,
+    summary: `Gate rejected: ${action.summary} — ${input.reason}`,
+    data: {
+      gate_action_id: action.id,
+      action_type: action.action_type,
+      decision: 'rejected',
+      reason: input.reason,
+      opportunity_id: action.opportunity_id,
+    },
+  })
+  return clone(enrichGateAction(action))
+}
+
 // ─── FE-owned aggregates ─────────────────────────────────────────────────────
 
 export async function getDashboard(): Promise<DashboardAggregate> {
@@ -481,11 +1024,20 @@ export async function getNextBestAction(): Promise<NextBestAction | null> {
   return clone(deriveNextBestAction(db.opportunities))
 }
 
-export async function getBrief(slot: 'morning' | 'evening'): Promise<Brief> {
-  if (apiMode() === 'real') return get<Brief>(`/api/briefs/${slot}`)
+/** GET /api/daily-brief/morning [W4] — counts by eye + top 3–5 priorities. */
+export async function getMorningBrief(): Promise<MorningBrief> {
+  if (apiMode() === 'real') return get<MorningBrief>('/api/daily-brief/morning')
   await delay()
-  const derived = deriveBriefs(db.tasks, db.opportunities)
-  return clone(derived.find((b) => b.slot === slot) ?? mockBriefs.find((b) => b.slot === slot) ?? mockBriefs[0])
+  return clone(
+    deriveMorningBrief(db.opportunities, db.tasks, db.signals, db.gateActions),
+  )
+}
+
+/** GET /api/daily-brief/evening [W4] — completed/pending/new + one observation. */
+export async function getEveningBrief(): Promise<EveningBrief> {
+  if (apiMode() === 'real') return get<EveningBrief>('/api/daily-brief/evening')
+  await delay()
+  return clone(deriveEveningBrief(db.opportunities, db.tasks, db.gateActions))
 }
 
 // ─── Health ──────────────────────────────────────────────────────────────────

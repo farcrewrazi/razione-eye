@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { agentDataSchema, type AgentData } from '@razione-eye/shared';
 import { getCtx, err } from './http-util.ts';
 import { nowIso } from './ulid.ts';
+import { JOB_ANALYST_NAME, runJobAnalyst } from './agents/run-service.ts';
 
 const RUNS_CAP = 50;
 
@@ -18,12 +19,22 @@ export const agentsRoute = new Hono()
     return c.json(node);
   })
   .post('/:id/run', (c) => {
-    const { nodes, events } = getCtx(c);
+    const ctx = getCtx(c);
+    const { nodes, events } = ctx;
     const node = nodes.getById(c.req.param('id'));
     if (!node || node.type !== 'AGENT') return err(c, 404, 'NOT_FOUND', 'agent not found');
 
-    // Phase-0 stub: record a run, set last_run + last_status "empty" (D-005: no real capability).
     const data = agentDataSchema.parse(node.data) as AgentData;
+
+    // ── Job Analyst (T1.4): real deterministic run over JOB opportunities ──
+    // ?force=true re-analyzes everything; default only jobs lacking sub-scores.
+    if (data.name === JOB_ANALYST_NAME) {
+      const force = c.req.query('force') === 'true';
+      const { agent, report } = runJobAnalyst(ctx, node, { force });
+      return c.json({ ...agent, report });
+    }
+
+    // ── Other agents: Phase-0 stub (D-005: capability not implemented yet) ──
     const now = nowIso();
     const runs = [...data.runs, { at: now, status: 'empty' as const, summary: 'stub run — capability not implemented in Phase 0' }].slice(-RUNS_CAP);
     const patched: AgentData = { ...data, last_run: now, last_status: 'empty', runs };

@@ -5,35 +5,12 @@
  * duplicates with reason 'existing'.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { openDb } from '../../src/db.ts';
 import { makeContext, type AppContext } from '../../src/context.ts';
 import { runImport } from '../../src/import/import-pipeline.ts';
 import type { ImportFileInput } from '../../src/import/types.ts';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const FIXTURES = resolve(here, '../../fixtures');
-
-const FORMAT_BY_EXT: Record<string, ImportFileInput['format']> = {
-  '.json': 'json',
-  '.csv': 'csv',
-  '.md': 'md',
-  '.txt': 'chat',
-};
-
-function loadFixtures(): ImportFileInput[] {
-  return readdirSync(FIXTURES)
-    .sort()
-    .filter((name) => FORMAT_BY_EXT[name.slice(name.lastIndexOf('.'))] !== undefined)
-    .map((name) => ({
-      name,
-      format: FORMAT_BY_EXT[name.slice(name.lastIndexOf('.'))]!,
-      content: readFileSync(resolve(FIXTURES, name), 'utf8'),
-    }));
-}
+import { loadFixtures } from './helpers.ts';
 
 function reconcile(report: ReturnType<typeof runImport>): void {
   const accounted = report.created.opportunities + report.totals.duplicates + report.totals.flagged;
@@ -51,24 +28,26 @@ beforeEach(() => {
 describe('cross-batch dedup (T1.2 idempotent re-imports)', () => {
   it('second import of the same fixtures creates 0 opportunities, all records are duplicates (reason existing)', () => {
     const first = runImport(ctx, loadFixtures());
-    expect(first.created.opportunities).toBe(27);
+    expect(first.created.opportunities).toBe(34);
     reconcile(first);
 
     const second = runImport(ctx, loadFixtures());
     expect(second.created.opportunities).toBe(0);
     expect(second.created.companies).toBe(0);
     expect(second.created.edges).toBe(0);
-    // Second run: 28 normalized survivors all match existing nodes (the one
-    // in-batch cross-file duplicate repeats too).
-    expect(second.totals.duplicates).toBe(28);
-    const reasons = second.files.flatMap((f) => f.duplicates.map((d) => d.reason));
-    expect(reasons.filter((r) => r === 'existing')).toHaveLength(27);
+    // Second run: all 40 normalized survivors reconcile as duplicates — 34 match
+    // existing nodes (reason 'existing'), 5 repeat as cross-channel links, 1 as
+    // the in-batch duplicate.
+    expect(second.totals.duplicates).toBe(40);
+    const reasons = second.files.flatMap((f) => f.duplicates.map((d) => d.reason ?? 'batch'));
+    expect(reasons.filter((r) => r === 'existing')).toHaveLength(34);
+    expect(reasons.filter((r) => r === 'linked')).toHaveLength(5);
     expect(reasons.filter((r) => r === 'batch')).toHaveLength(1);
     reconcile(second);
 
-    // Graph unchanged: still exactly 27 opportunities / 27 companies.
-    expect(ctx.nodes.countByType('OPPORTUNITY')).toBe(27);
-    expect(ctx.nodes.countByType('COMPANY')).toBe(27);
+    // Graph unchanged: still exactly 34 opportunities / 34 companies.
+    expect(ctx.nodes.countByType('OPPORTUNITY')).toBe(34);
+    expect(ctx.nodes.countByType('COMPANY')).toBe(34);
   });
 
   it('appends a provenance note + note_added event to existing opportunities on re-import', () => {
@@ -79,12 +58,12 @@ describe('cross-batch dedup (T1.2 idempotent re-imports)', () => {
     const withNote = items.filter((opp) =>
       opp.notes.some((n) => (typeof n === 'string' ? n : n.text).startsWith('Re-imported duplicate skipped:')),
     );
-    expect(withNote).toHaveLength(27);
+    expect(withNote).toHaveLength(34);
     const note = withNote[0]!.notes.map((n) => (typeof n === 'string' ? n : n.text)).find((t) => t.startsWith('Re-imported duplicate skipped:'))!;
     expect(note).toMatch(/Re-imported duplicate skipped: ".+ — .+" \(from file .+, format (json|csv|md|chat)\)/);
 
     const noteEvents = ctx.events.list().items.filter((e) => e.type === 'note_added');
-    expect(noteEvents).toHaveLength(27);
+    expect(noteEvents).toHaveLength(34);
   });
 
   it('merges fields the existing opportunity lacks (salary gained on re-import)', () => {

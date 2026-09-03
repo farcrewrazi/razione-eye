@@ -93,6 +93,39 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
     report?.duplicates.push({ kept: dup.kept, dropped: dup.dropped, reason: 'batch', file: dup.file });
   }
 
+  // ── Cross-file near-duplicates (T1.2): same company+role arriving via two
+  // channels (a JobStreet export AND a LinkedIn repost, source ignored). They
+  // must not become two opportunities: the richest record persists, the rest
+  // are linked onto it as alternates — reported with reason 'linked' and
+  // recorded as an "Also seen via …" provenance note on the persisted node.
+  // (When the keeper matched an existing opportunity instead, the loser's note
+  // folds into that node via the cross-batch pass below.)
+  const linked: Array<{ loser: { job: NormalizedJob; file: string }; winner: { job: NormalizedJob; file: string } }> = [];
+  const linkedLoserKeys = new Set<string>();
+  {
+    const byCompanyRole = new Map<string, { job: NormalizedJob; file: string }>();
+    for (const entry of dedupedSurvivors) {
+      const crKey = [normalizeCompanyName(entry.job.company), normalizeRoleTitle(entry.job.role)].join('|');
+      const existing = byCompanyRole.get(crKey);
+      if (!existing) {
+        byCompanyRole.set(crKey, entry);
+        continue;
+      }
+      const [winner, loser] =
+        richnessOf(entry.job) >= richnessOf(existing.job) ? [entry, existing] : [existing, entry];
+      byCompanyRole.set(crKey, winner);
+      linked.push({ loser, winner });
+      linkedLoserKeys.add(keyOf(loser.job));
+    }
+  }
+  const finalSurvivors = dedupedSurvivors.filter((e) => !linkedLoserKeys.has(keyOf(e.job)));
+  const keptByKey = new Map(finalSurvivors.map((e) => [keyOf(e.job), e]));
+  for (const { loser, winner } of linked) {
+    fileReports
+      .find((f) => f.path === loser.file)
+      ?.duplicates.push({ kept: describe(winner.job), dropped: describe(loser.job), reason: 'linked', file: loser.file });
+  }
+
   // ── Cross-batch dedup (T1.2): match survivors against existing JOB OPPORTUNITY
   // nodes on normalized company+role. Matches are skipped (never re-created) and
   // merged into the existing node; reported as duplicates with reason 'existing'.
@@ -111,16 +144,8 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
   /** Fields the new record may supply when the existing opportunity lacks them. */
   const MERGEABLE = ['location', 'salary', 'salary_min', 'salary_max', 'url', 'stack', 'contact'] as const;
 
-  for (const { job, file } of dedupedSurvivors) {
-    const existing = findExisting(job);
-    if (!existing) continue;
-
-    // Treat exactly like an in-batch duplicate: fold into the per-file report.
-    fileReports
-      .find((f) => f.path === file)
-      ?.duplicates.push({ kept: existing.name ?? `${job.company} — ${job.role}`, dropped: describe(job), reason: 'existing', file });
-
-    // Merge richer fields the existing opportunity lacks.
+  /** Append a provenance note (evented) + merge any richer fields. Returns the merged field names. */
+  const mergeIntoExisting = (existing: Node, job: NormalizedJob, noteText: string, file?: string): string[] => {
     const patch: Record<string, unknown> = {};
     const mergedFields: string[] = [];
     for (const field of MERGEABLE) {
@@ -132,20 +157,35 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
         mergedFields.push(field);
       }
     }
-
-    const noteText =
-      `Re-imported duplicate skipped: "${describe(job)}" (from file ${file}, format ${formatOf(files, file)})` +
-      (mergedFields.length > 0 ? ` — merged fields: ${mergedFields.join(', ')}` : '');
-    const notes = [...existing.notes, { text: noteText, created_at: nowIso() }];
+    const fullNote = noteText + (mergedFields.length > 0 ? ` — merged fields: ${mergedFields.join(', ')}` : '');
+    const notes = [...existing.notes, { text: fullNote, created_at: nowIso() }];
     nodes.update(existing.id, { notes, ...(Object.keys(patch).length > 0 ? { data: patch } : {}) });
     events.record({
       type: 'note_added',
       node_id: existing.id,
-      summary: noteText,
-      data: { file, merged_fields: mergedFields },
+      summary: fullNote,
+      data: { ...(file ? { file } : {}), merged_fields: mergedFields },
     });
+    return mergedFields;
+  };
+
+  for (const { job, file } of finalSurvivors) {
+    const existing = findExisting(job);
+    if (!existing) continue;
+
+    // Treat exactly like an in-batch duplicate: fold into the per-file report.
+    fileReports
+      .find((f) => f.path === file)
+      ?.duplicates.push({ kept: existing.name ?? `${job.company} — ${job.role}`, dropped: describe(job), reason: 'existing', file });
+
+    mergeIntoExisting(
+      existing,
+      job,
+      `Re-imported duplicate skipped: "${describe(job)}" (from file ${file}, format ${formatOf(files, file)})`,
+      file,
+    );
   }
-  const toCreate = dedupedSurvivors.filter(({ job }) => !findExisting(job));
+  const toCreate = finalSurvivors.filter(({ job }) => !findExisting(job));
 
   // ── Persist ──────────────────────────────────────────────────────────────
   let createdOpportunities = 0;
@@ -227,6 +267,26 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
     edges.belongsTo(opportunity.id, company.id);
     edges.hiring(company.id, opportunity.id);
     createdEdges += 2;
+
+    // Link cross-file near-duplicates (same company+role, other channels) onto
+    // this opportunity: a note carrying the alternate's fields (the visible
+    // duplicate linkage; no self-edges — edges connect distinct nodes).
+    const alternates = linked.filter((l) => keyOf(l.winner.job) === keyOf(job));
+    if (alternates.length > 0) {
+      const current = nodes.getById(opportunity.id)!;
+      nodes.update(opportunity.id, {
+        notes: [
+          ...current.notes,
+          ...alternates.map(({ loser, winner }) => ({
+            text:
+              `Also seen via ${loser.job.source ?? 'unknown source'} (from ${loser.file})` +
+              `${loser.job.salary ? ` · ${loser.job.salary}` : ''}${loser.job.url ? ` · ${loser.job.url}` : ''}` +
+              ` — kept "${describe(winner.job)}" as primary`,
+            created_at: nowIso(),
+          })),
+        ],
+      });
+    }
 
     events.record({
       type: 'opportunity_imported',

@@ -44,3 +44,23 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_node ON events(node_id, at);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(type, at);
+
+-- Wave 4 (T1.11): Action Gate — pending-approval queue. An agent prepares a draft
+-- action; it sits PENDING until Razi approves / edits-then-approves / rejects.
+-- Only on approve does the status update execute. Every decision also appends a
+-- `gate_decision` event to the events table (the decision log, feeds LEARN later).
+CREATE TABLE IF NOT EXISTS gate_actions (
+  id              TEXT PRIMARY KEY,      -- ULID
+  action_type     TEXT NOT NULL,          -- 'apply_to_job' (v1)
+  status          TEXT NOT NULL DEFAULT 'PENDING',  -- PENDING|APPROVED|REJECTED
+  opportunity_id  TEXT REFERENCES nodes(id) ON DELETE SET NULL,
+  task_id         TEXT REFERENCES nodes(id) ON DELETE SET NULL,
+  payload         TEXT NOT NULL,          -- JSON draft (e.g. cover_note, resume_version, apply_url)
+  summary         TEXT NOT NULL,          -- one-line human description for the review list
+  created_at      TEXT NOT NULL,
+  decided_at      TEXT,                   -- set on approve/reject
+  decision        TEXT,                   -- approved|edited_approved|rejected
+  decision_reason TEXT                    -- required on reject; optional note otherwise
+);
+CREATE INDEX IF NOT EXISTS idx_gate_status ON gate_actions(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_gate_opp ON gate_actions(opportunity_id);

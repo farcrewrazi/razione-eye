@@ -21,6 +21,7 @@ import type { CompanyDetail } from '@/api/types'
 import { BandBadge, EmptyState, StatusBadge } from '@/components/common'
 import { Badge, Button, Card, Skeleton, Table, Td, Th, Thead, Tr } from '@/components/ui'
 import { scoreColor } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
 /* ─── Info grid ─────────────────────────────────────────────────────────────── */
 
@@ -84,13 +85,26 @@ function InfoGrid({ company }: { company: CompanyDetail }) {
   )
 }
 
-/* ─── Opportunities table ───────────────────────────────────────────────────── */
+/* ─── Opportunities table (sorted by score DESC, mono rank 01, 02…) ─────────── */
 
-function OpportunityRow({ o, onOpen }: { o: CompanyDetail['opportunities'][number]; onOpen: (id: string) => void }) {
+function OpportunityRow({
+  o,
+  rank,
+  onOpen,
+}: {
+  o: CompanyDetail['opportunities'][number]
+  rank: number
+  onOpen: (id: string) => void
+}) {
   return (
     <Tr className="cursor-pointer" onClick={() => onOpen(o.id)}>
+      <Td className="w-10 font-mono text-xs text-[var(--color-muted)] tabular-nums">
+        {String(rank).padStart(2, '0')}
+      </Td>
       <Td className="max-w-64">
-        <div className="truncate text-[13px] font-medium text-[var(--color-text)]">{o.data.role ?? o.name}</div>
+        <span className="truncate text-[13px] font-medium text-[var(--color-text)] hover:text-[var(--color-accent)]">
+          {o.data.role ?? o.name}
+        </span>
       </Td>
       <Td>
         {o.score != null ? (
@@ -162,7 +176,14 @@ export function CompanyDetailPage() {
 
   const d = company.data
   const open = (opportunityId: string): void => void navigate(`/opportunities/${opportunityId}`)
-  const opportunities = company.opportunities
+  // Score DESC, null scores last (created_at as tiebreaker for determinism).
+  const opportunities = [...company.opportunities].sort((a, b) => {
+    if (a.score == null && b.score == null) return a.created_at.localeCompare(b.created_at)
+    if (a.score == null) return 1
+    if (b.score == null) return -1
+    if (b.score === a.score) return a.created_at.localeCompare(b.created_at)
+    return b.score - a.score
+  })
 
   return (
     <div className="flex flex-col gap-5">
@@ -224,6 +245,7 @@ export function CompanyDetailPage() {
                 <Table>
                   <Thead>
                     <Tr className="hover:bg-transparent">
+                      <Th className="w-10">#</Th>
                       <Th>Role</Th>
                       <Th>Score</Th>
                       <Th>Band</Th>
@@ -231,8 +253,8 @@ export function CompanyDetailPage() {
                     </Tr>
                   </Thead>
                   <tbody>
-                    {opportunities.map((o) => (
-                      <OpportunityRow key={o.id} o={o} onOpen={open} />
+                    {opportunities.map((o, i) => (
+                      <OpportunityRow key={o.id} o={o} rank={i + 1} onOpen={open} />
                     ))}
                   </tbody>
                 </Table>
@@ -259,23 +281,27 @@ export function CompanyDetailPage() {
               <p className="text-xs text-[var(--color-muted)]">No stack recorded.</p>
             )}
           </Card>
-          <Card className="px-4 py-4">
-            <h2 className="mb-2 font-mono text-[10px] font-semibold tracking-[0.25em] text-[var(--color-muted)]">
-              AI CULTURE
-            </h2>
-            {d.ai_culture_notes && d.ai_culture_notes.length > 0 ? (
+          {d.ai_culture_notes && d.ai_culture_notes.length > 0 && (
+            <Card
+              className={cn(
+                'border-[var(--color-accent)]/30 bg-[var(--color-accent)]/[0.04] px-4 py-4',
+                'shadow-[0_0_24px_-12px_var(--color-accent)]/40',
+              )}
+            >
+              <h2 className="mb-2.5 flex items-center gap-1.5 font-mono text-[10px] font-semibold tracking-[0.25em] text-[var(--color-accent)]">
+                <Sparkles className="size-3.5" />
+                AI CULTURE
+              </h2>
               <ul className="flex flex-col gap-2">
                 {d.ai_culture_notes.map((note) => (
                   <li key={note} className="flex items-start gap-1.5 text-xs leading-5 text-[var(--color-text)]/85">
-                    <Sparkles className="mt-0.5 size-3 shrink-0 text-[var(--color-accent)]/60" />
+                    <span className="mt-1.5 size-1 shrink-0 rounded-full bg-[var(--color-accent)]/60" />
                     {note}
                   </li>
                 ))}
               </ul>
-            ) : (
-              <p className="text-xs text-[var(--color-muted)]">No AI culture notes yet.</p>
-            )}
-          </Card>
+            </Card>
+          )}
         </div>
       </div>
     </div>

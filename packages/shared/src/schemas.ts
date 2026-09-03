@@ -234,6 +234,11 @@ export const edgeTypeSchema = z.enum(EDGE_TYPES);
 export const noteSchema = z.union([z.string(), z.object({ text: z.string(), created_at: isoTimestampSchema })]);
 export const notesSchema = z.array(noteSchema);
 
+/** Normalize any stored note entry to display text (notes may be plain strings or objects). */
+export function noteText(note: Note): string {
+  return typeof note === 'string' ? note : note.text;
+}
+
 // ─── Type-specific data payloads (stored in nodes.data) ─────────────────────
 
 export const personDataSchema = z
@@ -282,7 +287,7 @@ export const contactSchema = z
 
 export const nextActionSchema = z.object({
   type: z.string().min(1),
-  due: z.string().min(1),
+  due: z.string().min(1).nullable(), // ISO date; null = no due date
 });
 
 export const jobOpportunityDataSchema = z
@@ -412,6 +417,7 @@ export const EVENT_TYPES = [
   'import_run',
   'agent_run',
   'gate_decision',
+  'analyzed',
 ] as const;
 export const eventTypeSchema = z.enum(EVENT_TYPES);
 
@@ -438,6 +444,9 @@ export const createOpportunitySchema = z
     notes: notesSchema.optional(),
     due_at: isoTimestampSchema.nullable().optional(),
     score: scoreSchema.nullable().optional(),
+    /** T1.1.6-BE (W3): link this manual entry back to a signal — the signal is
+     *  created if missing, then marked PROMOTED with promoted_to = the new node. */
+    signal_id: ulidSchema.optional(),
   })
   .strict();
 
@@ -589,6 +598,80 @@ export const appendNoteSchema = z
   })
   .strict();
 
+// ─── Action Gate (T1.11 — Wave 4) ────────────────────────────────────────────
+// Gate mechanics per docs/03-agents-and-gates.md §4: an agent prepares a DRAFT
+// action → it sits PENDING on the dashboard → Razi Approves / Edit-then-approves
+// / Rejects → only then does the status update execute. Every decision is logged.
+
+/** Action types that require explicit Razi approval (v1: the apply-task flow). */
+export const GATE_ACTION_TYPES = ['apply_to_job'] as const;
+export const gateActionTypeSchema = z.enum(GATE_ACTION_TYPES);
+
+export const GATE_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
+export const gateStatusSchema = z.enum(GATE_STATUSES);
+
+export const GATE_DECISIONS = ['approved', 'edited_approved', 'rejected'] as const;
+export const gateDecisionSchema = z.enum(GATE_DECISIONS);
+
+/** The prepared draft payload for `apply_to_job` — a ready-to-paste application kit. */
+export const applyToJobPayloadSchema = z
+  .object({
+    opportunity_id: ulidSchema,
+    task_id: ulidSchema.optional(), // created on approve when omitted
+    cover_note: z.string().optional(),
+    resume_version: z.string().optional(),
+    apply_url: z.string().url().optional(),
+    notes: z.string().optional(),
+  })
+  .passthrough();
+
+/** Submit a draft action to the gate (system prepares → Razi confirms). */
+export const createGateActionSchema = z
+  .object({
+    action_type: gateActionTypeSchema,
+    payload: z.record(z.unknown()), // validated per action_type on the server
+    opportunity_id: ulidSchema.optional(), // fallback link when payload has none
+    task_id: ulidSchema.optional(),
+  })
+  .strict();
+
+/** Edit-then-approve: replace the draft payload before approving. */
+export const updateGateActionSchema = z
+  .object({
+    payload: z.record(z.unknown()),
+  })
+  .strict();
+
+export const approveGateActionSchema = z
+  .object({
+    payload: z.record(z.unknown()).optional(), // edit-then-approve in one call
+  })
+  .strict();
+
+export const rejectGateActionSchema = z
+  .object({
+    reason: z.string().min(1),
+  })
+  .strict();
+
+/** Wire shape for one gate queue entry. */
+export const gateActionSchema = z.object({
+  id: ulidSchema,
+  action_type: gateActionTypeSchema,
+  status: gateStatusSchema,
+  opportunity_id: ulidSchema.nullable(),
+  task_id: ulidSchema.nullable(),
+  payload: z.record(z.unknown()),
+  summary: z.string(),
+  created_at: isoTimestampSchema,
+  decided_at: isoTimestampSchema.nullable(),
+  decision: gateDecisionSchema.nullable(),
+  decision_reason: z.string().nullable(),
+  // Enriched on reads (never stored): the linked nodes for the review screen.
+  opportunity: nodeSchema.nullable().optional(),
+  task: nodeSchema.nullable().optional(),
+});
+
 
 // ─── Error envelope ──────────────────────────────────────────────────────────
 
@@ -623,6 +706,15 @@ export type Note = z.infer<typeof noteSchema>;
 export type PersonData = z.infer<typeof personDataSchema>;
 export type CompanyData = z.infer<typeof companyDataSchema>;
 export type Matching = z.infer<typeof matchingSchema>;
+/** All six sub-scores present (analyst output — vs Matching, all-optional on storage). */
+export interface SubScores {
+  role_match: number;
+  company_match: number;
+  ai_culture: number;
+  location: number;
+  salary: number;
+  career_upside: number;
+}
 export type NextAction = z.infer<typeof nextActionSchema>;
 export type JobOpportunityData = z.infer<typeof jobOpportunityDataSchema>;
 export type TaskData = z.infer<typeof taskDataSchema>;
@@ -650,3 +742,12 @@ export type ImportDuplicate = z.infer<typeof importDuplicateSchema>;
 export type ImportFileReport = z.infer<typeof importFileReportSchema>;
 export type ImportReport = z.infer<typeof importReportSchema>;
 export type AppendNote = z.infer<typeof appendNoteSchema>;
+export type GateActionType = z.infer<typeof gateActionTypeSchema>;
+export type GateStatus = z.infer<typeof gateStatusSchema>;
+export type GateDecision = z.infer<typeof gateDecisionSchema>;
+export type ApplyToJobPayload = z.infer<typeof applyToJobPayloadSchema>;
+export type CreateGateAction = z.infer<typeof createGateActionSchema>;
+export type UpdateGateAction = z.infer<typeof updateGateActionSchema>;
+export type ApproveGateAction = z.infer<typeof approveGateActionSchema>;
+export type RejectGateAction = z.infer<typeof rejectGateActionSchema>;
+export type GateAction = z.infer<typeof gateActionSchema>;

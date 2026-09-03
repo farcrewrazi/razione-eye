@@ -14,6 +14,7 @@ import {
 } from '@razione-eye/shared';
 import { getCtx, err } from './http-util.ts';
 import { nodeEventsHandler } from './events.ts';
+import { linkExistingOpportunityToSignal } from './signal-promotion.ts';
 import { nowIso } from './ulid.ts';
 
 /** Validate status against the pipeline for this opportunity_type. */
@@ -157,6 +158,15 @@ export const opportunitiesRoute = new Hono()
       summary: `Opportunity "${node.name ?? node.id}" created (${status})`,
       data: { status, opportunity_type: input.opportunity_type, source: node.source },
     });
+
+    // T1.1.6-BE: optional signal link-back — mark the source signal PROMOTED.
+    if (input.signal_id) {
+      const signal = nodes.getById(input.signal_id);
+      if (!signal || signal.type !== 'SIGNAL') {
+        return err(c, 422, 'VALIDATION', `signal_id ${input.signal_id} does not reference a SIGNAL node`);
+      }
+      linkExistingOpportunityToSignal(getCtx(c), signal, node);
+    }
 
     return c.json(withBand(node), 201);
   })
