@@ -15,6 +15,8 @@ import type { Task, TaskPriority, TaskStatus } from '@/api/types'
 import { TASK_PRIORITIES, TASK_STATUSES } from '@/api/types'
 import { EmptyState, PageHeader, StatusBadge } from '@/components/common'
 import { Badge, Button, Card, Input, Select, Skeleton, Table, Td, Textarea, Th, Thead, Tr, useToast } from '@/components/ui'
+import { useEyeFocus } from '@/hooks/useEyeFocus'
+import { opportunityInEye } from '@/lib/eyes'
 import { timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -281,6 +283,7 @@ function TaskRow({ t, opportunities, onStatus }: {
 export function TasksPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const { eye, def, focused } = useEyeFocus()
   const [status, setStatus] = useState<TaskStatus | ''>('')
   const [overdueOnly, setOverdueOnly] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
@@ -304,7 +307,7 @@ export function TasksPage() {
     queryFn: () => listTasks({ limit: 500 }),
   })
 
-  // Opportunities for the serves-chip labels.
+  // Opportunities for the serves-chip labels + the eye of each served task.
   const { data: opportunitiesData } = useQuery({
     queryKey: ['opportunities', { chips: 'task-serves' }],
     queryFn: () => listOpportunities({ limit: 200 }),
@@ -312,6 +315,9 @@ export function TasksPage() {
   })
   const opportunityNames = new Map(
     (opportunitiesData?.items ?? []).map((o) => [o.id, o.name ?? o.data.role]),
+  )
+  const opportunityTypes = new Map(
+    (opportunitiesData?.items ?? []).map((o) => [o.id, o.opportunity_type]),
   )
 
   const statusMutation = useMutation({
@@ -327,17 +333,39 @@ export function TasksPage() {
     },
   })
 
-  const items = data?.items ?? []
+  /*
+   * Eye filter (T1.13): tasks inherit the eye of the opportunity they serve;
+   * unlinked tasks are global and always shown. ALL / CONTROL show everything.
+   */
+  const eyeFiltered = focused
+    ? (all?.items ?? []).filter((t) => {
+        const servesId = t.data.opportunity_id
+        if (!servesId) return true
+        return opportunityInEye(opportunityTypes.get(servesId), eye)
+      })
+    : (all?.items ?? [])
+
+  const items = focused
+    ? (data?.items ?? []).filter((t) => {
+        const servesId = t.data.opportunity_id
+        if (!servesId) return true
+        return opportunityInEye(opportunityTypes.get(servesId), eye)
+      })
+    : (data?.items ?? [])
   const total = data?.total ?? 0
-  const openCount = (all?.items ?? []).filter((t) => t.status === 'TODO' || t.status === 'IN_PROGRESS').length
-  const overdueCount = (all?.items ?? []).filter((t) => isOverdue(t)).length
-  const doneTodayCount = (all?.items ?? []).filter((t) => isDoneToday(t)).length
+  const openCount = eyeFiltered.filter((t) => t.status === 'TODO' || t.status === 'IN_PROGRESS').length
+  const overdueCount = eyeFiltered.filter((t) => isOverdue(t)).length
+  const doneTodayCount = eyeFiltered.filter((t) => isDoneToday(t)).length
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Tasks"
-        subtitle="Work queue derived from pipeline needs."
+        subtitle={
+          focused
+            ? `${def.label} work queue — unlinked tasks stay visible.`
+            : 'Work queue derived from pipeline needs.'
+        }
         actions={
           <Button size="sm" variant={formOpen ? 'outline' : 'default'} onClick={() => setFormOpen((o) => !o)}>
             <Plus className="size-3.5" />
@@ -413,11 +441,13 @@ export function TasksPage() {
       ) : items.length === 0 ? (
         <EmptyState
           icon={<ListChecks />}
-          title={status || overdueOnly ? 'No matches' : 'No tasks yet'}
+          title={status || overdueOnly ? 'No matches' : focused ? `No ${def.shortLabel} Eye tasks` : 'No tasks yet'}
           hint={
             status || overdueOnly
               ? 'Nothing matches the current filters — clear them to see the full queue.'
-              : 'Tasks created here or derived from the pipeline will appear.'
+              : focused
+                ? `${def.label} tasks appear here as its pipeline produces work — reset the focus to All for the full queue.`
+                : 'Tasks created here or derived from the pipeline will appear.'
           }
         />
       ) : (

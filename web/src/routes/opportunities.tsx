@@ -17,6 +17,8 @@ import type { Opportunity, ScoreBand } from '@/api/types'
 import { JOB_STATUSES, SCORE_BANDS } from '@/api/types'
 import { BandBadge, EmptyState, PageHeader, StatusBadge } from '@/components/common'
 import { Button, Card, Input, Select, Skeleton, Table, Td, Th, Thead, Tr } from '@/components/ui'
+import { useEyeFocus } from '@/hooks/useEyeFocus'
+import { opportunityInEye } from '@/lib/eyes'
 import { salaryLabel, scoreColor, timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { PipelineBoard } from './pipeline'
@@ -78,6 +80,7 @@ function OpportunityRow({ o, onOpen }: { o: Opportunity; onOpen: (id: string) =>
 
 export function OpportunitiesPage() {
   const navigate = useNavigate()
+  const { eye, def, focused } = useEyeFocus()
   const [view, setView] = useState<ViewMode>(loadViewPref)
   const [q, setQ] = useState('')
   const [status, setStatus] = useState<StatusFilter>('')
@@ -92,6 +95,11 @@ export function OpportunitiesPage() {
     }
   }, [view])
 
+  // Reset the paging window whenever the eye focus changes.
+  useEffect(() => {
+    setPage(0)
+  }, [eye])
+
   // Debounce the search box so typing doesn't thrash the query key.
   const [qInput, setQInput] = useState('')
   const qTimer = useRef<number | undefined>(undefined)
@@ -102,34 +110,55 @@ export function OpportunitiesPage() {
     qTimer.current = window.setTimeout(() => setQ(value), 250)
   }
 
+  /*
+   * Eye filter (T1.13): single-type eyes pass `type` to the backend (mock and
+   * real both honor it today). Multi-type eyes (BUSINESS) and ALL fetch the
+   * wide window and post-filter client-side — works identically until/unless
+   * a `?eye=` param lands server-side.
+   */
+  const singleType = focused && def.opportunityTypes.length === 1 ? def.opportunityTypes[0] : undefined
+  const postFilter = focused && !singleType
   const params = {
     q: q || undefined,
     status: status || undefined,
     band: band || undefined,
-    type: 'JOB' as const,
+    type: singleType,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
     sort: '-score',
   }
+  const fetchParams = postFilter
+    ? { q: params.q, status: params.status, band: params.band, limit: 500, sort: '-score' as const }
+    : params
 
   const { data, isPending, isFetching, isError, error, refetch } = useQuery({
-    queryKey: ['opportunities', params],
-    queryFn: () => listOpportunities(params),
+    queryKey: ['opportunities', fetchParams, eye],
+    queryFn: () => listOpportunities(fetchParams),
     placeholderData: (prev) => prev,
   })
 
   const open = (id: string): void => void navigate(`/opportunities/${id}`)
-  const total = data?.total ?? 0
+  const filtered = postFilter
+    ? (data?.items ?? []).filter((o) => opportunityInEye(o.opportunity_type, eye))
+    : (data?.items ?? [])
+  const total = postFilter ? filtered.length : (data?.total ?? 0)
+  const items = postFilter ? filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE) : filtered
   const pageStart = total === 0 ? 0 : page * PAGE_SIZE + 1
   const pageEnd = Math.min((page + 1) * PAGE_SIZE, total)
   const hasPrev = page > 0
   const hasNext = (page + 1) * PAGE_SIZE < total
 
+  const subtitle = !focused
+    ? 'Career pipeline — every discovered role, ranked by match.'
+    : eye === 'CONTROL'
+      ? 'Every opportunity across all eyes — Control sees the whole board.'
+      : `${def.label} — ${def.opportunityTypes.join(' + ') || 'cross-eye'} opportunities, ranked by score.`
+
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <PageHeader
         title="Opportunities"
-        subtitle="Career pipeline — every discovered role, ranked by match."
+        subtitle={subtitle}
         actions={
           <div className="flex items-center gap-3">
             <span className="font-mono text-xs tracking-wider text-[var(--color-muted)] tabular-nums">
@@ -242,13 +271,15 @@ export function OpportunitiesPage() {
             </Button>
           }
         />
-      ) : data.items.length === 0 ? (
+      ) : total === 0 ? (
         <EmptyState
-          title={q || status || band ? 'No matches' : 'Pipeline is empty'}
+          title={q || status || band ? 'No matches' : focused ? `Nothing in ${def.shortLabel} Eye yet` : 'Pipeline is empty'}
           hint={
             q || status || band
               ? 'Nothing matches the current filters — clear them to see the full pipeline.'
-              : 'Discovered jobs will appear here once the scouts run.'
+              : focused
+                ? `${def.label} owns ${def.opportunityTypes.join(' + ') || 'no'} opportunities — reset the focus to All to see the full pipeline.`
+                : 'Discovered jobs will appear here once the scouts run.'
           }
         />
       ) : (
@@ -266,7 +297,7 @@ export function OpportunitiesPage() {
               </Tr>
             </Thead>
             <tbody>
-              {data.items.map((o) => (
+              {items.map((o) => (
                 <OpportunityRow key={o.id} o={o} onOpen={open} />
               ))}
             </tbody>

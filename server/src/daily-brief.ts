@@ -8,9 +8,10 @@
  * Fully deterministic reads over the graph + events log; no writes.
  */
 
-import { bandForScore, type Node } from '@razione-eye/shared';
+import { bandForScore, type Eye, type Node } from '@razione-eye/shared';
 import type { AppContext } from './context.ts';
 import { linkedCompany, nextBestAction, type NbaResult } from './dashboard.ts';
+import { actionableStatusesForType, opportunityTypesForEye } from './eye.ts';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -64,11 +65,18 @@ function parseDue(due: string | null | undefined): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
-function jobOpps(ctx: AppContext): Node[] {
-  return ctx.nodes.list({ type: 'OPPORTUNITY', opportunity_type: 'JOB', limit: 200 }).items;
+function jobOpps(ctx: AppContext, eye: Eye = 'all'): Node[] {
+  return ctx.nodes
+    .list({ type: 'OPPORTUNITY', opportunity_types: opportunityTypesForEye(eye), limit: 200 })
+    .items;
 }
 
-export function morningBrief(ctx: AppContext, now: Date = new Date()): MorningBrief {
+/**
+ * Morning brief scoped by Eye. Priorities, career counts and the NBA use the
+ * eye's opportunity slice; tasks / gate / overdue parts stay global.
+ * No eye (default 'all') = today's behavior (JOB-first priorities).
+ */
+export function morningBrief(ctx: AppContext, now: Date = new Date(), eye: Eye = 'all'): MorningBrief {
   const { nodes, gate } = ctx;
   const todayEnd = endOfTodayIso(now);
   const since24h = new Date(now.getTime() - DAY_MS).toISOString();
@@ -78,16 +86,21 @@ export function morningBrief(ctx: AppContext, now: Date = new Date()): MorningBr
     .items.filter((t) => t.status === 'TODO' || t.status === 'IN_PROGRESS');
   const overdueTasks = openTasks.filter((t) => t.due_at !== null && t.due_at < startOfTodayIso(now)).length;
 
-  const opps = jobOpps(ctx);
+  const opps = jobOpps(ctx, eye);
   const oppsDue = opps.filter((o) => {
     const t = parseDue((o.data['next_action'] as { due?: string | null } | undefined)?.due);
     return t !== null && t <= Date.parse(todayEnd);
   });
   const gatePending = gate.pendingCount();
 
-  // Top 3–5 priorities: actionable JOB opps ranked by score, then soonest due.
+  // Top 3–5 priorities: actionable eye-scoped opps ranked by score, then soonest due.
   const priorities = opps
-    .filter((o) => o.status !== null && ['ANALYZED', 'QUALIFIED', 'READY_TO_APPLY'].includes(o.status))
+    .filter(
+      (o) =>
+        o.status !== null &&
+        o.opportunity_type !== null &&
+        actionableStatusesForType(o.opportunity_type).has(o.status),
+    )
     .map((o) => ({ o, band: bandForScore(o.score) }))
     .filter(({ band }) => band === 'PRIORITY' || band === 'APPLY')
     .sort((a, b) => {
@@ -111,21 +124,28 @@ export function morningBrief(ctx: AppContext, now: Date = new Date()): MorningBr
       };
     });
 
-  const nba = nextBestAction(ctx, now);
+  const nba = nextBestAction(ctx, now, eye);
+
+  // Career counters reflect JOB activity when the eye shows career
+  // (career/all/control); other eyes see structurally-zero career blocks.
+  const careerVisible = eye === 'career' || eye === 'all' || eye === 'control';
+  const jobOppsInEye = careerVisible ? opps.filter((o) => o.opportunity_type === 'JOB') : [];
 
   return {
     kind: 'morning',
     date: now.toISOString().slice(0, 10),
     counts: {
-      // Open tasks (due or not) + opps with a due next_action ≤ today + pending gate approvals.
+      // Open tasks (global) + eye-scoped opps with a due next_action ≤ today + pending gate approvals.
       actions_required: openTasks.length + oppsDue.length + gatePending,
       gate_pending: gatePending,
       overdue_tasks: overdueTasks,
       career: {
-        new_jobs: opps.filter((o) => o.created_at >= since24h).length,
-        high_match: opps.filter((o) => bandForScore(o.score) === 'PRIORITY').length,
-        pending_applications: opps.filter((o) => o.status === 'APPLIED' || o.status === 'RECRUITER_RESPONSE').length,
-        recruiters_awaiting: opps.filter((o) => o.status === 'RECRUITER_RESPONSE').length,
+        new_jobs: jobOppsInEye.filter((o) => o.created_at >= since24h).length,
+        high_match: jobOppsInEye.filter((o) => bandForScore(o.score) === 'PRIORITY').length,
+        pending_applications: jobOppsInEye.filter(
+          (o) => o.status === 'APPLIED' || o.status === 'RECRUITER_RESPONSE',
+        ).length,
+        recruiters_awaiting: jobOppsInEye.filter((o) => o.status === 'RECRUITER_RESPONSE').length,
       },
       business: { discovered: 0 },
       affiliate: { content_opportunities: 0 },
@@ -136,7 +156,12 @@ export function morningBrief(ctx: AppContext, now: Date = new Date()): MorningBr
   };
 }
 
-export function eveningBrief(ctx: AppContext, now: Date = new Date()): EveningBrief {
+/**
+ * Evening brief scoped by Eye. Task / gate / new-today parts stay global;
+ * the "opportunities awaiting action" count and the observation chain use the
+ * eye's opportunity slice.
+ */
+export function eveningBrief(ctx: AppContext, now: Date = new Date(), eye: Eye = 'all'): EveningBrief {
   const { nodes, events } = ctx;
   const dayStart = startOfTodayIso(now);
 
@@ -153,12 +178,15 @@ export function eveningBrief(ctx: AppContext, now: Date = new Date()): EveningBr
   // Gate-approved apply actions complete a task too — count them alongside plain task completions.
   const completedToday = statusCompletedToday + gateApprovedToday;
 
-  const opps = jobOpps(ctx);
+  const opps = jobOpps(ctx, eye);
   const openTasks = nodes
     .list({ type: 'TASK', limit: 200 })
     .items.filter((t) => t.status === 'TODO' || t.status === 'IN_PROGRESS').length;
-  const oppsAwaiting = opps.filter((o) =>
-    o.status !== null && ['ANALYZED', 'QUALIFIED', 'READY_TO_APPLY'].includes(o.status),
+  const oppsAwaiting = opps.filter(
+    (o) =>
+      o.status !== null &&
+      o.opportunity_type !== null &&
+      actionableStatusesForType(o.opportunity_type).has(o.status),
   ).length;
 
   const newOpps = today.filter((e) => e.type === 'opportunity_created' || e.type === 'opportunity_imported').length;
@@ -170,7 +198,7 @@ export function eveningBrief(ctx: AppContext, now: Date = new Date()): EveningBr
     completedToday,
     gateDecisionsToday: gateApprovedToday,
     oppsAwaiting,
-  });
+  }, eye);
 
   return {
     kind: 'evening',
@@ -191,8 +219,9 @@ export function eveningBrief(ctx: AppContext, now: Date = new Date()): EveningBr
 function observe(
   ctx: AppContext,
   s: { now: Date; newOpps: number; completedToday: number; gateDecisionsToday: number; oppsAwaiting: number },
+  eye: Eye = 'all',
 ): { observation: string; recommendation: string } {
-  const opps = jobOpps(ctx);
+  const opps = jobOpps(ctx, eye);
   const discovered = opps.filter((o) => o.status === 'DISCOVERED' || o.status === 'ANALYZED').length;
   const applied = opps.filter((o) => o.status === 'APPLIED').length;
   const awaitingReply = opps.filter((o) => o.status === 'RECRUITER_RESPONSE').length;

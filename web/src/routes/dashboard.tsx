@@ -28,6 +28,8 @@ import {
   StatusBadge,
 } from '@/components/common'
 import { Badge, Button, Card, Skeleton, useToast } from '@/components/ui'
+import { useEyeFocus } from '@/hooks/useEyeFocus'
+import { eyeForOpportunityType, type EyeId } from '@/lib/eyes'
 import { dueMeta, salaryLabel, timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -43,15 +45,23 @@ function TodayRow({
   metrics,
   phase,
   live,
+  dim = false,
 }: {
   eye: string
   metrics: Metric[]
   /** When set the eye isn't live yet — values render dimmed + phase tag. */
   phase?: number
   live?: boolean
+  /** Not the focused eye — row stays visible but recedes. */
+  dim?: boolean
 }) {
   return (
-    <div className="grid grid-cols-[6.5rem_1fr] items-center gap-3 px-4 py-2.5">
+    <div
+      className={cn(
+        'grid grid-cols-[6.5rem_1fr] items-center gap-3 px-4 py-2.5 transition-opacity',
+        dim && 'opacity-40',
+      )}
+    >
       <span className="font-mono text-[11px] font-medium tracking-[0.18em] text-[var(--color-text)]/80">
         {eye}
       </span>
@@ -229,6 +239,7 @@ export function DashboardPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const { eye } = useEyeFocus()
   const { data, isPending, isError, error, refetch } = useQuery({
     queryKey: ['dashboard'],
     queryFn: getDashboard,
@@ -309,6 +320,20 @@ export function DashboardPage() {
     nba?.opportunity != null &&
     (gatePending?.items ?? []).some((a) => a.payload.opportunity_id === nba.opportunity?.id)
 
+  // Eye focus (T1.13) — TODAY rows recede when their eye isn't focused; the
+  // NBA hero + follow-ups are global surfaces (shown in ALL / CAREER /
+  // CONTROL, and whenever the NBA belongs to the focused eye).
+  const nbaEye: EyeId | null = nba?.opportunity ? eyeForOpportunityType(nba.opportunity.opportunity_type) : null
+  const showNba = eye === 'ALL' || eye === 'CONTROL' || nbaEye === eye
+  const showFollowUps = eye === 'ALL' || eye === 'CAREER' || eye === 'CONTROL'
+  const todayRows: Array<{ eye: string; eyeId: EyeId }> = [
+    { eye: 'CAREER', eyeId: 'CAREER' },
+    { eye: 'BUSINESS', eyeId: 'BUSINESS' },
+    { eye: 'AFFILIATE', eyeId: 'GROWTH' },
+    { eye: 'GEMS', eyeId: 'SIGNAL' },
+  ]
+  const dimFor = (eyeId: EyeId): boolean => eye !== 'ALL' && eye !== 'CONTROL' && eye !== eyeId
+
   return (
     <div className="flex flex-col gap-5">
       {/* Header — homepage contract line 1 */}
@@ -351,7 +376,7 @@ export function DashboardPage() {
       </header>
 
       {/* NEXT BEST ACTION — hero */}
-      {nba ? (
+      {nba && showNba ? (
         <NextBestActionCard
           nba={nba}
           gatePendingForOpp={nbaInGate}
@@ -364,7 +389,11 @@ export function DashboardPage() {
         <EmptyState
           icon={<Crosshair />}
           title="No next best action"
-          hint="Nothing actionable right now — the pipeline is clear or fully terminal."
+          hint={
+            nba && !showNba
+              ? 'The current NBA belongs to another eye — reset the focus to All to see it.'
+              : 'Nothing actionable right now — the pipeline is clear or fully terminal.'
+          }
           action={
             <Button variant="outline" size="sm" onClick={() => void navigate('/opportunities')}>
               View pipeline
@@ -374,7 +403,7 @@ export function DashboardPage() {
       )}
 
       {/* FOLLOW-UPS — applications awaiting replies / next steps (T1.8) */}
-      <FollowUpsSection opportunities={followUpJobs?.items ?? []} />
+      {showFollowUps && <FollowUpsSection opportunities={followUpJobs?.items ?? []} />}
 
       {/* TODAY */}
       <section className="flex flex-col gap-2">
@@ -391,6 +420,7 @@ export function DashboardPage() {
             <TodayRow
               eye="CAREER"
               live
+              dim={dimFor(todayRows[0]!.eyeId)}
               metrics={[
                 { value: data.today.career.new_jobs, label: 'new jobs' },
                 { value: data.today.career.high_match, label: 'high-match' },
@@ -401,6 +431,7 @@ export function DashboardPage() {
             <TodayRow
               eye="BUSINESS"
               phase={3}
+              dim={dimFor(todayRows[1]!.eyeId)}
               metrics={[
                 { value: data.today.business.discovered, label: 'businesses discovered' },
                 { value: data.today.business.worth_approaching, label: 'worth approaching' },
@@ -410,6 +441,7 @@ export function DashboardPage() {
             <TodayRow
               eye="AFFILIATE"
               phase={4}
+              dim={dimFor(todayRows[2]!.eyeId)}
               metrics={[
                 { value: data.today.affiliate.content_opportunities, label: 'content opportunities' },
                 { value: data.today.affiliate.scheduled, label: 'posts scheduled' },
@@ -418,6 +450,7 @@ export function DashboardPage() {
             <TodayRow
               eye="GEMS"
               phase={5}
+              dim={dimFor(todayRows[3]!.eyeId)}
               metrics={[
                 { value: data.today.gems.tokens_detected, label: 'tokens detected' },
                 { value: data.today.gems.passed_filter, label: 'passed initial filter' },

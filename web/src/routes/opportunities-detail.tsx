@@ -50,7 +50,9 @@ import {
 import type { Event, EventType, Matching, Note, OpportunityDetail } from '@/api/types'
 import { JOB_STATUSES, JOB_TERMINAL_STATUSES } from '@/api/types'
 import { BandBadge, EmptyState, ScoreBar, ScoreDial, StatusBadge } from '@/components/common'
+import { EyeBadge } from '@/components/eye/EyeBadge'
 import { Badge, Button, Card, Input, Select, Skeleton, Textarea, useToast } from '@/components/ui'
+import { eyeForOpportunityType } from '@/lib/eyes'
 import { dueMeta, formatDateTime, humanizeToken, salaryLabel, timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -957,6 +959,8 @@ export function OpportunityDetailPage() {
                   {o.opportunity_type}
                 </Badge>
               )}
+              {/* Owning eye (T1.13) — deep links always render regardless of focus. */}
+              <EyeBadge eye={eyeForOpportunityType(o.opportunity_type)} />
             </div>
             <h1 className="mt-2 truncate text-xl font-semibold tracking-tight text-[var(--color-text)]">
               {o.data.role ?? o.name}

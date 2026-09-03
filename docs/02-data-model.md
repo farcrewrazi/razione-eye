@@ -46,6 +46,7 @@ status:             <pipeline stage, see Section 4>
 opportunity_score:  0-100 (see Section 6)
 company:            ref → COMPANY
 next_action:        { type, due }        # feeds Next Best Action
+eye:                career | business | growth | signal   # lens derived from opportunity_type (docs/07 §3.5)
 ```
 
 ### 2.1 JOB opportunity (Career Eye)

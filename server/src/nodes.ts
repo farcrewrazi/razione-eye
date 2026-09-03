@@ -79,6 +79,8 @@ export interface ListNodesFilter {
   type?: NodeType;
   status?: string;
   opportunity_type?: OpportunityType;
+  /** Match any of these opportunity types (SQL IN) — Eye scoping. */
+  opportunity_types?: readonly string[];
   /** Substring match against name + data blob. */
   q?: string;
   limit?: number;
@@ -187,6 +189,17 @@ export class NodesRepo {
     if (filter.opportunity_type) {
       where.push('opportunity_type = ?');
       params.push(filter.opportunity_type);
+    }
+    if (filter.opportunity_types) {
+      // Explicit empty list = match nothing (callers wanting "everything" pass every type).
+      const types = filter.opportunity_types.filter((t) => typeof t === 'string' && t !== '');
+      if (types.length === 0) {
+        where.push('1 = 0');
+      } else {
+        const placeholders = types.map(() => '?').join(', ');
+        where.push(`opportunity_type IN (${placeholders})`);
+        params.push(...types);
+      }
     }
     if (filter.q) {
       where.push('(name LIKE ? OR data LIKE ?)');

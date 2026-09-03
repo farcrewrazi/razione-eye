@@ -107,6 +107,38 @@ Event list endpoints return `{ items: Event[], total: number }`, newest first.
 
 ---
 
+## 3.5 Eye scoping (`?eye=`)
+
+The five Eyes are lenses over the same graph — not separate stores. List and aggregation endpoints accept an optional `?eye=` query param:
+
+`career | business | growth | signal | control | all` (default **`all`**). An unknown value is `400 BAD_QUERY`. **Omitting `?eye=` is always identical to today's behavior** (everything visible, JOB-first aggregations) — no migration needed.
+
+| Eye | OPPORTUNITY types | SIGNAL types | Board columns (`board=true`) |
+|---|---|---|---|
+| `career` | `JOB` | `JOB_POSTING` | JOB pipeline |
+| `business` | `WEBSITE`, `CONSULTANCY` | `BUSINESS_DISCOVERY` | BUSINESS pipeline |
+| `growth` | `AFFILIATE` | `SOCIAL_POST`, `COMMENT` | AFFILIATE pipeline |
+| `signal` | `CRYPTO` | all (incl. `GEM_CALL`) | CRYPTO pipeline |
+| `control` | all (no own types) | all (incl. `GEM_CALL`) | JOB pipeline (legacy default) |
+| `all` | all | all (incl. `GEM_CALL`) | JOB pipeline (legacy default) |
+
+Shared maps live in `packages/shared/src/schemas.ts` (`EYES`, `eyeSchema`, `OPPORTUNITY_TYPES_BY_EYE`, `EYE_BY_OPPORTUNITY_TYPE`, `SIGNAL_TYPES_BY_EYE`); server helpers in `server/src/eye.ts`.
+
+Scoping rules:
+
+- **An explicit `type`/`signal_type` param wins** when both it and `eye` are given (e.g. `?eye=business&type=JOB` returns JOBs).
+- **Opportunities** (`GET /api/opportunities`): items filtered to the eye's types; `board=true` columns follow the eye per the table above.
+- **Signals** (`GET /api/signals`): filtered by `SIGNAL_TYPES_BY_EYE` (post-query, `signal_type` lives in `data`). GEM_CALL belongs to Signal Eye — visible in `signal`/`control`/`all` only.
+- **Dashboard / Next Best Action** (`GET /api/dashboard`, `GET /api/next-best-action`):
+  - `career` block is live only for `career|all|control`; structurally zero otherwise.
+  - `business` / `affiliate` / `gems` blocks stay structurally zero (Phases 3–5).
+  - `actions_required` = **global** open tasks due ≤ today + **eye-scoped** opportunities with `next_action.due` ≤ today.
+  - `agents` are always global (the registry is not eye-scoped).
+  - NBA picks the highest-scored opportunity within the eye's slice (actionable status + PRIORITY/APPLY band, ties by soonest due). For `all`/`control` it stays JOB-only (legacy contract).
+- **Daily Brief** (`GET /api/daily-brief/morning`, `/evening`): `priorities`, career counts, NBA and `pending`'s opportunity part are eye-scoped; tasks / gate / overdue / `new_today` parts stay global.
+
+---
+
 ## 4. Endpoints
 
 ### Health
@@ -131,10 +163,11 @@ Event list endpoints return `{ items: Event[], total: number }`, newest first.
   - **Other agents** — **stub** (Phase 0): appends a run entry, sets `last_run`, `last_status: "empty"`. Records an `agent_run` event. → updated Node
 
 ### Opportunities
-- `GET /api/opportunities?type&status&band&q&limit&offset&sort&board` **[W2: board param]**
-  - `type` = opportunity_type · `status` = pipeline stage · `band` = `PRIORITY|APPLY|REVIEW|ARCHIVE` (score-derived) · `q` = substring on name+data · `limit` (default 50, max 200) · `offset` · `sort` = `score|created_at|updated_at|due_at|name`, prefix `-` for DESC (default `-created_at`)
+- `GET /api/opportunities?type&status&band&q&limit&offset&sort&board&eye` **[W2: board param]**
+  - `type` = opportunity_type · `status` = pipeline stage · `band` = `PRIORITY|APPLY|REVIEW|ARCHIVE` (score-derived) · `q` = substring on name+data · `limit` (default 50, max 200) · `offset` · `sort` = `score|created_at|updated_at|due_at|name`, prefix `-` for DESC (default `-created_at`) · `eye` = Eye scoping ([§3.5](#35-eye-scoping-eye))
   - → `{ items: (Node & { band })[], total }`
-  - **[W2]** `board=true` → grouped-by-status payload for the pipeline board: `{ columns: [{ status, items: (Node & {band})[] }], total }` — one column per JOB status in pipeline order (empty columns included), other query params still apply.
+  - **[W2]** `board=true` → grouped-by-status payload for the pipeline board: `{ columns: [{ status, items: (Node & {band})[] }], total }` — one column per status in pipeline order (empty columns included), other query params still apply. Column set follows §3.5: the eye's pipeline, or the JOB pipeline for `career`/`all`/`control`/no-eye (backward compatible). An explicit `type` always wins.
+  - `type` wins over `eye` when both are given; unknown `type` or `eye` → `400 BAD_QUERY`.
 - `GET /api/opportunities/:id` → `Node & { band, edges: Edge[], neighbors: Node[] }` (graph neighbors included)
 - `GET /api/opportunities/:id/events` **[W2]** → `{ items: Event[], total }` (activity log for the detail screen)
 - `POST /api/opportunities/:id/notes` **[W2]** — body: `{ text }`. Appends a `{text, created_at}` note + records a `note_added` event. → 201 Node
@@ -173,7 +206,7 @@ Event list endpoints return `{ items: Event[], total: number }`, newest first.
 - `GET /api/companies/:id` → `Node & { opportunities: (Node & {band})[] }` (its opportunities via `belongs_to`/`hiring` edges)
 
 ### Signals
-- `GET /api/signals?disposition&signal_type&q&limit&offset` → `{ items, total }`
+- `GET /api/signals?disposition&signal_type&q&limit&offset&eye` → `{ items, total }` — `eye` scopes by `SIGNAL_TYPES_BY_EYE` ([§3.5](#35-eye-scoping-eye)); an explicit `signal_type` wins when both are given
 - `POST /api/signals` — body: `{ data: { signal_type, content, url?, observed_at, promoted_to? }, status?, source?, name?, tags?, notes? }` (status defaults `NEW`). Records a `signal_created` event. → 201 Node
 - `GET /api/signals/:id` → Node
 - `GET /api/signals/:id/events` **[W2]** → `{ items: Event[], total }`
@@ -184,14 +217,14 @@ Event list endpoints return `{ items: Event[], total: number }`, newest first.
 - `GET /api/pipeline/ranking` (T1.4) — lightweight ranked projection of all JOB opportunities, score DESC (unscored last). → `{ items: [{ id, role, company, score, band, status, next_action_due }], total }`
 
 ### Dashboard & Next Best Action **[W3]** (T1.9-BE groundwork)
-- `GET /api/next-best-action` — picks the highest-score JOB opportunity with `status ∈ {QUALIFIED, READY_TO_APPLY, ANALYZED}` and `band ∈ {PRIORITY, APPLY}`; ties broken by soonest `next_action.due`. →
+- `GET /api/next-best-action?eye` — picks the highest-score opportunity **within the eye's slice** ([§3.5](#35-eye-scoping-eye); no eye = JOB-only) with `status` actionable for its opportunity_type (JOB: `QUALIFIED, READY_TO_APPLY, ANALYZED`; other types: every non-terminal stage) and `band ∈ {PRIORITY, APPLY}`; ties broken by soonest `next_action.due`. →
   ```ts
   { opportunity: (Node & { band, company: Node | null }) | null,
     reason: string | null,        // e.g. "Score 79 (APPLY) · Kuala Lumpur · stack overlap 100% · due in 2 days"
     match_score: number | null }
   ```
   `{ opportunity: null, reason: null, match_score: null }` when nothing qualifies.
-- `GET /api/dashboard` — deterministic aggregations from the graph:
+- `GET /api/dashboard?eye` — deterministic aggregations from the graph, scoped per [§3.5](#35-eye-scoping-eye) (career block zeroed unless eye ∈ {career, all, control}; actions_required = global open tasks due ≤ today + eye-scoped opps due ≤ today; agents always global):
   ```ts
   { today: {
       actions_required: number,   // open TASKs due ≤ today + JOB opps with next_action.due ≤ today
@@ -259,17 +292,18 @@ The gate queue. `PENDING` items are the dashboard's "actions required". Every de
 
 Deterministic reads, no writes, safe to poll.
 
-- `GET /api/daily-brief/morning` →
+- `GET /api/daily-brief/morning?eye` →
   ```ts
   { kind: 'morning', date: 'YYYY-MM-DD',
     counts: { actions_required,      // open tasks due ≤ today + opps due ≤ today + pending gate approvals
-              gate_pending, overdue_tasks,
-              career: { new_jobs, high_match, pending_applications, recruiters_awaiting },
-              business: { discovered }, affiliate: { content_opportunities }, gems: { tokens_detected } },
-    priorities: [{ opportunity_id, role, company, score, band, next_action }],  // top 3–5: ANALYZED/QUALIFIED/READY_TO_APPLY, PRIORITY+APPLY bands, score DESC then soonest due
-    next_best_action: <NBA shape> | null }
-  ```
-- `GET /api/daily-brief/evening` →
+    gate_pending, overdue_tasks,
+    career: { new_jobs, high_match, pending_applications, recruiters_awaiting },   // zeroed unless eye ∈ {career, all, control}
+    business: { discovered }, affiliate: { content_opportunities }, gems: { tokens_detected } },
+  priorities: [{ opportunity_id, role, company, score, band, next_action }],  // top 3–5: eye-scoped actionable opps, PRIORITY+APPLY bands, score DESC then soonest due
+  next_best_action: <NBA shape> | null }
+```
+  Unscoped parts: `actions_required` open-task term, `gate_pending`, `overdue_tasks` (see §3.5).
+- `GET /api/daily-brief/evening?eye` →
   ```ts
   { kind: 'evening', date,
     completed_today,            // tasks set DONE today (status_changed events)

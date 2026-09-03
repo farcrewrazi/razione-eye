@@ -14,10 +14,11 @@ import { pipelineRoute } from './pipeline.ts';
 import { dashboardRoute } from './dashboard-routes.ts';
 import { gateRoute } from './gate.ts';
 import { morningBrief, eveningBrief } from './daily-brief.ts';
+import { parseEyeQuery } from './eye.ts';
+import { err, getCtx } from './http-util.ts';
 import { importRoute } from './import/import-api.ts';
 import { runSeed } from './seed-service.ts';
 import { runBackup } from './backup-service.ts';
-import { getCtx } from './http-util.ts';
 
 export function createApp(db: DatabaseSync): { app: Hono; ctx: AppContext } {
   const ctx = makeContext(db);
@@ -57,8 +58,16 @@ export function createApp(db: DatabaseSync): { app: Hono; ctx: AppContext } {
     .route('/', dashboardRoute)
     .route('/import', importRoute)
     .route('/gate', gateRoute)
-    .get('/daily-brief/morning', (c) => c.json(morningBrief(getCtx(c))))
-    .get('/daily-brief/evening', (c) => c.json(eveningBrief(getCtx(c))))
+    .get('/daily-brief/morning', (c) => {
+      const eyeParsed = parseEyeQuery(c.req.query('eye'));
+      if ('error' in eyeParsed) return err(c, 400, 'BAD_QUERY', eyeParsed.error);
+      return c.json(morningBrief(getCtx(c), new Date(), eyeParsed.eye));
+    })
+    .get('/daily-brief/evening', (c) => {
+      const eyeParsed = parseEyeQuery(c.req.query('eye'));
+      if ('error' in eyeParsed) return err(c, 400, 'BAD_QUERY', eyeParsed.error);
+      return c.json(eveningBrief(getCtx(c), new Date(), eyeParsed.eye));
+    })
     .post('/seed', (c) => c.json(runSeed(ctx)))
     .post('/backup', (c) => c.json(runBackup(ctx.db)));
 

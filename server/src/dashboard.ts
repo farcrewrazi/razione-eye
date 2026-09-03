@@ -8,6 +8,7 @@
  */
 import {
   bandForScore,
+  type Eye,
   type Node,
   type PersonData,
   type ScoreBand,
@@ -15,9 +16,9 @@ import {
 import type { AppContext } from './context.ts';
 import { PROFILE_PERSON_NAME } from './seed-service.ts';
 import { canonicalStackToken, scoreLocation } from './agents/rules.ts';
+import { actionableStatusesForType, opportunityTypesForEye } from './eye.ts';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const NBA_STATUSES = new Set(['QUALIFIED', 'READY_TO_APPLY', 'ANALYZED']);
 const NBA_BANDS = new Set<ScoreBand>(['PRIORITY', 'APPLY']);
 
 export interface NbaResult {
@@ -88,19 +89,31 @@ export function buildNbaReason(
 }
 
 /**
- * Pick the Next Best Action: highest-score JOB opportunity in an actionable
- * status (QUALIFIED/READY_TO_APPLY/ANALYZED) and band PRIORITY/APPLY;
- * ties broken by soonest next_action due. Null when nothing qualifies.
+ * Pick the Next Best Action: highest-score opportunity in the eye's slice with
+ * an actionable status (JOB: QUALIFIED/READY_TO_APPLY/ANALYZED; provisional for
+ * other types) and band PRIORITY/APPLY; ties broken by soonest next_action due.
+ * Null when nothing qualifies. No eye (default 'all') = today's JOB-only behavior.
  */
-export function nextBestAction(ctx: AppContext, now: Date = new Date()): NbaResult {
+export function nextBestAction(ctx: AppContext, now: Date = new Date(), eye: Eye = 'all'): NbaResult {
   const { nodes } = ctx;
   const profile = nodes.findByTypeAndName('PERSON', PROFILE_PERSON_NAME);
   const profileSkills = (profile?.data as PersonData | undefined)?.skills;
 
-  const { items } = nodes.list({ type: 'OPPORTUNITY', opportunity_type: 'JOB', limit: 200, sort: '-score' });
+  // Legacy contract: with no eye (or all/control), NBA stays JOB-only — the
+  // other eyes' stages aren't defined yet, so they can't outrank a job.
+  const types = eye === 'all' || eye === 'control' ? (['JOB'] as const) : opportunityTypesForEye(eye);
+  if (types.length === 0) return { opportunity: null, reason: null, match_score: null };
+
+  const { items } = nodes.list({ type: 'OPPORTUNITY', opportunity_types: types, limit: 200, sort: '-score' });
   const candidates = items
     .map((opp) => ({ opp, band: bandForScore(opp.score) }))
-    .filter(({ opp, band }) => opp.status !== null && NBA_STATUSES.has(opp.status) && NBA_BANDS.has(band));
+    .filter(
+      ({ opp, band }) =>
+        opp.status !== null &&
+        opp.opportunity_type !== null &&
+        actionableStatusesForType(opp.opportunity_type).has(opp.status) &&
+        NBA_BANDS.has(band),
+    );
 
   if (candidates.length === 0) return { opportunity: null, reason: null, match_score: null };
 
@@ -144,19 +157,32 @@ export interface DashboardPayload {
   next_best_action: NbaResult | null;
 }
 
-/** Deterministic dashboard aggregation — structurally-zero eyes until Phases 3–5. */
-export function dashboard(ctx: AppContext, now: Date = new Date()): DashboardPayload {
+/**
+ * Deterministic dashboard aggregation, scoped by Eye.
+ *   career block: live counts for JOB opportunities when the eye includes
+ *   career (career/all/control), structurally zero otherwise.
+ *   business / affiliate / gems stay structurally zero until Phases 3–5.
+ * actions_required = global open tasks due ≤ today + scoped opps due ≤ today.
+ * agents are always global (the registry is not eye-scoped).
+ */
+export function dashboard(ctx: AppContext, now: Date = new Date(), eye: Eye = 'all'): DashboardPayload {
   const { nodes } = ctx;
   const todayEnd = endOfTodayIso(now);
   const since24h = new Date(now.getTime() - DAY_MS).toISOString();
 
-  // actions_required: open TASKs due ≤ today + JOB opportunities with next_action.due ≤ today.
+  // actions_required: open TASKs due ≤ today (global) + eye-scoped opps with next_action.due ≤ today.
   const openTasksDue = nodes
     .list({ type: 'TASK', limit: 200, due_before: todayEnd })
     .items.filter((t) => t.status === 'TODO' || t.status === 'IN_PROGRESS').length;
 
-  const jobOpps = nodes.list({ type: 'OPPORTUNITY', opportunity_type: 'JOB', limit: 200 }).items;
-  const oppsDueToday = jobOpps.filter((opp) => {
+  const careerVisible = eye === 'career' || eye === 'all' || eye === 'control';
+  const oppTypes = opportunityTypesForEye(eye);
+  const opps = nodes
+    .list({ type: 'OPPORTUNITY', opportunity_types: oppTypes, limit: 200 })
+    .items as Array<Node & { opportunity_type: NonNullable<Node['opportunity_type']> }>;
+  const jobOpps = careerVisible ? opps.filter((o) => o.opportunity_type === 'JOB') : [];
+
+  const oppsDueToday = opps.filter((opp) => {
     const due = (opp.data['next_action'] as { due?: string | null } | undefined)?.due;
     const t = parseDue(due);
     return t !== null && t <= Date.parse(todayEnd);
@@ -169,7 +195,7 @@ export function dashboard(ctx: AppContext, now: Date = new Date()): DashboardPay
 
   const agents = nodes.list({ type: 'AGENT', sort: 'name', limit: 50 }).items;
 
-  const nba = nextBestAction(ctx, now);
+  const nba = nextBestAction(ctx, now, eye);
 
   return {
     today: {

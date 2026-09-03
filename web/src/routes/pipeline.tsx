@@ -30,6 +30,8 @@ import type { JobStatus, Opportunity, ScoreBand } from '@/api/types'
 import { JOB_STATUSES, JOB_TERMINAL_STATUSES, SCORE_BANDS } from '@/api/types'
 import { BandBadge, EmptyState } from '@/components/common'
 import { Button, Card, Input, Skeleton, useToast } from '@/components/ui'
+import { useEyeFocus } from '@/hooks/useEyeFocus'
+import { opportunityInEye } from '@/lib/eyes'
 import { dueMeta, salaryLabel, scoreColor } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -362,6 +364,7 @@ export function PipelineBoard() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const { eye, def, focused } = useEyeFocus()
 
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
@@ -380,11 +383,18 @@ export function PipelineBoard() {
     qTimer.current = setTimeout(() => setQ(value), 250) as unknown as number
   }
 
-  // Flat list — FE groups by status (mock mirrors current contract; BE board
-  // grouping arrives later).
+  /*
+   * Flat list — FE groups by status. Eye filter (T1.13): single-type eyes
+   * pass `type` to the backend; ALL / CONTROL / multi-type eyes fetch the
+   * wide window and post-filter client-side.
+   */
+  const singleType = focused && def.opportunityTypes.length === 1 ? def.opportunityTypes[0] : undefined
+  const fetchParams = singleType
+    ? { type: singleType, limit: BOARD_LIMIT, sort: '-score' as const }
+    : { limit: BOARD_LIMIT, sort: '-score' as const }
   const { data, isPending, isError, error, refetch } = useQuery({
-    queryKey: BOARD_QUERY_KEY,
-    queryFn: () => listOpportunities({ type: 'JOB', limit: BOARD_LIMIT, sort: '-score' }),
+    queryKey: [...BOARD_QUERY_KEY, eye],
+    queryFn: () => listOpportunities(fetchParams),
   })
 
   /* ── Status mutation: optimistic move, rollback + toast on failure ── */
@@ -414,19 +424,21 @@ export function PipelineBoard() {
     },
   })
 
-  /* ── Derived: search filter + status grouping ── */
+  /* ── Derived: eye filter + search filter + status grouping ── */
 
   const items = useMemo(() => data?.items ?? [], [data])
 
+  const eyeVisible = useMemo(() => items.filter((o) => opportunityInEye(o.opportunity_type, eye)), [items, eye])
+
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    if (!needle) return items
-    return items.filter((o) =>
+    if (!needle) return eyeVisible
+    return eyeVisible.filter((o) =>
       [o.name, o.company?.name, o.data.role, o.data.location].some(
         (v) => typeof v === 'string' && v.toLowerCase().includes(needle),
       ),
     )
-  }, [items, q])
+  }, [eyeVisible, q])
 
   const grouped = useMemo(() => {
     const map = new Map<string, Opportunity[]>(JOB_STATUSES.map((s) => [s, []]))
@@ -569,7 +581,7 @@ export function PipelineBoard() {
           ))}
         </div>
         <span className="ml-auto font-mono text-[11px] tracking-wider text-[var(--color-muted)] tabular-nums">
-          {isPending ? '…' : `${visible.length}/${data?.total ?? 0} SHOWN`}
+          {isPending ? '…' : `${visible.length}/${eyeVisible.length} SHOWN`}
         </span>
       </div>
 
@@ -583,6 +595,15 @@ export function PipelineBoard() {
             <Button variant="outline" size="sm" onClick={() => void refetch()}>
               Retry
             </Button>
+          }
+        />
+      ) : !isPending && eyeVisible.length === 0 ? (
+        <EmptyState
+          title={focused ? `Nothing in ${def.shortLabel} Eye yet` : 'Pipeline is empty'}
+          hint={
+            focused
+              ? `${def.label} owns ${def.opportunityTypes.join(' + ') || 'no'} opportunities — reset the focus to All to see the full board.`
+              : 'Discovered jobs will appear here once the scouts run.'
           }
         />
       ) : (

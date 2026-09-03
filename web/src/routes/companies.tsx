@@ -15,6 +15,8 @@ import { JOB_TERMINAL_STATUSES } from '@/api/types'
 import type { Company, Opportunity } from '@/api/types'
 import { EmptyState, PageHeader } from '@/components/common'
 import { Badge, Button, Card, Input, Select, Skeleton } from '@/components/ui'
+import { useEyeFocus } from '@/hooks/useEyeFocus'
+import { opportunityInEye } from '@/lib/eyes'
 import { scoreColor } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -174,6 +176,7 @@ const SORT_LABELS: Record<CompanySort, string> = {
 
 export function CompaniesPage() {
   const navigate = useNavigate()
+  const { eye } = useEyeFocus()
   const [q, setQ] = useState('')
   const [sort, setSort] = useState<CompanySort>('open')
 
@@ -193,13 +196,17 @@ export function CompaniesPage() {
     placeholderData: (prev) => prev,
   })
 
-  // Stats source — all JOB opportunities (open count + avg score per company).
+  // Stats source — all opportunities (open count + avg score per company),
+  // narrowed to the focused eye (T1.13); ALL / CONTROL see every type.
   const { data: jobs } = useQuery({
     queryKey: ['companies-stats', 'jobs'],
-    queryFn: () => listOpportunities({ type: 'JOB', limit: 500 }),
+    queryFn: () => listOpportunities({ limit: 500 }),
     placeholderData: (prev) => prev,
   })
-  const stats = useMemo(() => deriveCompanyStats(jobs?.items ?? []), [jobs])
+  const stats = useMemo(
+    () => deriveCompanyStats((jobs?.items ?? []).filter((o) => opportunityInEye(o.opportunity_type, eye))),
+    [jobs, eye],
+  )
 
   const open = (id: string): void => void navigate(`/companies/${id}`)
   const items = useMemo(() => {

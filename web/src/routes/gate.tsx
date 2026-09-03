@@ -33,6 +33,8 @@ import { approveGateAction, listGateActions, rejectGateAction } from '@/api/prov
 import type { GateAction, GateStatus } from '@/api/types'
 import { EmptyState, PageHeader, StatusBadge } from '@/components/common'
 import { Badge, Button, Card, Input, Skeleton, Textarea, useToast } from '@/components/ui'
+import { useEyeFocus } from '@/hooks/useEyeFocus'
+import { opportunityInEye } from '@/lib/eyes'
 import { formatDateTime, timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -584,6 +586,7 @@ function invalidateAfterDecision(queryClient: ReturnType<typeof useQueryClient>)
 export function GatePage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const { eye, def, focused } = useEyeFocus()
   const [filter, setFilter] = useState<StatusFilter>('PENDING')
   /** Dialog state: confirm-approve / edit-approve / reject target. */
   const [confirming, setConfirming] = useState<GateAction | null>(null)
@@ -620,8 +623,17 @@ export function GatePage() {
     },
   })
 
-  const items = data?.items ?? []
-  const total = data?.total ?? 0
+  /*
+   * Eye filter (T1.13): actions inherit the eye of their linked opportunity;
+   * actions without a resolvable opportunity stay visible (global ops items).
+   * Tab counts stay global so pending work in other eyes is never lost.
+   */
+  const inEye = (a: GateAction): boolean => {
+    if (!focused) return true
+    if (!a.opportunity) return true
+    return opportunityInEye(a.opportunity.opportunity_type, eye)
+  }
+  const items = (data?.items ?? []).filter(inEye)
   const pendingCount = counts.PENDING
 
   return (
@@ -649,7 +661,7 @@ export function GatePage() {
       <div className="flex flex-wrap items-center gap-2">
         <StatusFilterTabs value={filter} counts={counts} onChange={setFilter} />
         <span className="ml-auto font-mono text-[11px] tracking-wider text-[var(--color-muted)] tabular-nums">
-          {isPending ? '…' : `${total} TOTAL`}
+          {isPending ? '…' : `${items.length} TOTAL`}
         </span>
       </div>
 
@@ -676,10 +688,12 @@ export function GatePage() {
       ) : items.length === 0 ? (
         <EmptyState
           icon={<ShieldCheck />}
-          title={filter === 'ALL' ? 'Queue is empty' : `No ${filter.toLowerCase()} actions`}
+          title={filter === 'ALL' ? 'Queue is empty' : focused ? `No ${def.shortLabel} Eye ${filter.toLowerCase()} actions` : `No ${filter.toLowerCase()} actions`}
           hint={
             filter === 'PENDING'
-              ? 'Nothing waiting on you — the system will queue prepared actions here.'
+              ? focused
+                ? `Nothing waiting in ${def.label} — reset the focus to All for the full queue.`
+                : 'Nothing waiting on you — the system will queue prepared actions here.'
               : 'Switch filters to see the rest of the decision history.'
           }
         />

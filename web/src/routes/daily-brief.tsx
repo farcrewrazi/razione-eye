@@ -21,6 +21,7 @@ import { getEveningBrief, getMorningBrief, listAgents } from '@/api/provider'
 import type { Agent, EveningBrief, MorningBrief, NextBestAction } from '@/api/types'
 import { AgentStatusDot, BandBadge, EmptyState, PageHeader, StatusBadge } from '@/components/common'
 import { Badge, Button, Card, Skeleton } from '@/components/ui'
+import { useEyeFocus } from '@/hooks/useEyeFocus'
 import { dueMeta, timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -72,12 +73,15 @@ function CountChip({
   value,
   tone,
   to,
+  dim = false,
 }: {
   label: string
   value: number
   tone: 'green' | 'sky' | 'amber' | 'red' | 'slate'
   /** Optional route — the chip becomes a link (e.g. gate pending → /gate). */
   to?: string
+  /** Not the focused eye — the chip stays visible but recedes (T1.13). */
+  dim?: boolean
 }) {
   const tones = {
     green: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
@@ -87,7 +91,10 @@ function CountChip({
     slate: 'border-[var(--color-border)] bg-white/[0.03] text-[var(--color-muted)]',
   } as const
   const chip = (
-    <Badge variant="outline" className={cn('px-2.5 py-1 font-mono text-[11px] tracking-wider', tones[tone])}>
+    <Badge
+      variant="outline"
+      className={cn('px-2.5 py-1 font-mono text-[11px] tracking-wider transition-opacity', tones[tone], dim && 'opacity-40')}
+    >
       <span className="font-semibold tabular-nums">{value}</span>&nbsp;{label}
     </Badge>
   )
@@ -166,8 +173,11 @@ function PriorityRow({
 /* ─── Morning ───────────────────────────────────────────────────────────────── */
 
 function MorningView({ brief }: { brief: MorningBrief }) {
+  const { eye } = useEyeFocus()
   const nba: NextBestAction | null = brief.next_best_action?.opportunity ? brief.next_best_action : null
   const c = brief.counts
+  // Dim eye-tagged chips that aren't the focus — the brief stays global (T1.13).
+  const dimCareer = eye !== 'ALL' && eye !== 'CONTROL' && eye !== 'CAREER'
 
   return (
     <div className="flex flex-col gap-4">
@@ -199,10 +209,10 @@ function MorningView({ brief }: { brief: MorningBrief }) {
           to="/gate"
         />
         <CountChip label="OVERDUE TASKS" value={c.overdue_tasks} tone={c.overdue_tasks > 0 ? 'red' : 'slate'} />
-        <CountChip label="NEW JOBS" value={c.career.new_jobs} tone="green" />
-        <CountChip label="HIGH-MATCH" value={c.career.high_match} tone="green" />
-        <CountChip label="APPLICATIONS PENDING" value={c.career.pending_applications} tone="sky" />
-        <CountChip label="RECRUITERS AWAITING" value={c.career.recruiters_awaiting} tone="sky" />
+        <CountChip label="NEW JOBS" value={c.career.new_jobs} tone="green" dim={dimCareer} />
+        <CountChip label="HIGH-MATCH" value={c.career.high_match} tone="green" dim={dimCareer} />
+        <CountChip label="APPLICATIONS PENDING" value={c.career.pending_applications} tone="sky" dim={dimCareer} />
+        <CountChip label="RECRUITERS AWAITING" value={c.career.recruiters_awaiting} tone="sky" dim={dimCareer} />
       </div>
 
       {/* Priorities */}

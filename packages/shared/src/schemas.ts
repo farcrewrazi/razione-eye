@@ -154,6 +154,43 @@ export const JOB_SOURCES = [
 export const SIGNAL_DISPOSITIONS = ['NEW', 'PROMOTED', 'DISMISSED', 'DUPLICATE'] as const;
 export const signalDispositionSchema = z.enum(SIGNAL_DISPOSITIONS);
 
+// ─── Eyes (scoping lenses over the same graph — docs/07 §Eye scoping) ────────
+// Five Eyes + ALL. Each Eye owns a slice of OPPORTUNITY types / SIGNAL types.
+// 'all' (the default when no ?eye= is given) shows everything; 'control' is the
+// manager homepage and also sees everything.
+
+export const EYES = ['career', 'business', 'growth', 'signal', 'control', 'all'] as const;
+export const eyeSchema = z.enum(EYES);
+
+/** OPPORTUNITY types each Eye shows. Empty (control) = everything. */
+export const OPPORTUNITY_TYPES_BY_EYE: Record<Eye, readonly OpportunityType[]> = {
+  career: ['JOB'],
+  business: ['WEBSITE', 'CONSULTANCY'],
+  growth: ['AFFILIATE'],
+  signal: ['CRYPTO'],
+  control: [],
+  all: OPPORTUNITY_TYPES,
+};
+
+/** Which Eye an OPPORTUNITY belongs to (inverse of the map above). */
+export const EYE_BY_OPPORTUNITY_TYPE: Record<OpportunityType, Exclude<Eye, 'all'>> = {
+  JOB: 'career',
+  WEBSITE: 'business',
+  CONSULTANCY: 'business',
+  AFFILIATE: 'growth',
+  CRYPTO: 'signal',
+};
+
+/** SIGNAL types each Eye shows (Signal Eye + Control + ALL see everything, incl. GEM_CALL). */
+export const SIGNAL_TYPES_BY_EYE: Record<Eye, readonly SignalType[]> = {
+  career: ['JOB_POSTING'],
+  business: ['BUSINESS_DISCOVERY'],
+  growth: ['SOCIAL_POST', 'COMMENT'],
+  signal: SIGNAL_TYPES,
+  control: SIGNAL_TYPES,
+  all: SIGNAL_TYPES,
+};
+
 export const AGENT_KINDS = ['native', 'adapter'] as const;
 export const agentKindSchema = z.enum(AGENT_KINDS);
 
@@ -686,6 +723,7 @@ export const errorEnvelopeSchema = z.object({
 
 export type NodeType = z.infer<typeof nodeTypeSchema>;
 export type OpportunityType = z.infer<typeof opportunityTypeSchema>;
+export type Eye = z.infer<typeof eyeSchema>;
 export type JobStatus = z.infer<typeof jobStatusSchema>;
 export type BusinessStatus = z.infer<typeof businessStatusSchema>;
 export type AffiliateStatus = z.infer<typeof affiliateStatusSchema>;

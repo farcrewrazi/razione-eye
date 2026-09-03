@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import {
-  JOB_STATUSES,
   STATUS_BY_OPPORTUNITY_TYPE,
   appendNoteSchema,
   bandForScore,
@@ -11,11 +10,13 @@ import {
   updateOpportunitySchema,
   updateOpportunityStatusSchema,
   type Node,
+  type OpportunityType,
 } from '@razione-eye/shared';
 import { getCtx, err } from './http-util.ts';
 import { nodeEventsHandler } from './events.ts';
 import { linkExistingOpportunityToSignal } from './signal-promotion.ts';
 import { nowIso } from './ulid.ts';
+import { boardStatusesForEye, JOB_PIPELINE_STATUSES, OPPORTUNITY_TYPES_BY_EYE, parseEyeQuery } from './eye.ts';
 
 /** Validate status against the pipeline for this opportunity_type. */
 function statusValidForType(opportunityType: string, status: string): boolean {
@@ -40,10 +41,17 @@ export const opportunitiesRoute = new Hono()
     const { nodes } = getCtx(c);
     const q = c.req.query();
 
-    const oppType = q['type'];
-    if (oppType && !opportunityTypeSchema.safeParse(oppType).success) {
-      return err(c, 400, 'BAD_QUERY', `invalid type: ${oppType}`);
+    // Eye scoping (docs/07 §Eye scoping). Invalid eye → 400 BAD_QUERY.
+    // Explicit ?type= wins when both are given (a type is always within an eye).
+    const eyeParsed = parseEyeQuery(q['eye']);
+    if ('error' in eyeParsed) return err(c, 400, 'BAD_QUERY', eyeParsed.error);
+    const eye = eyeParsed.eye;
+
+    const oppTypeRaw = q['type'];
+    if (oppTypeRaw && !opportunityTypeSchema.safeParse(oppTypeRaw).success) {
+      return err(c, 400, 'BAD_QUERY', `invalid type: ${oppTypeRaw}`);
     }
+    const oppType = (oppTypeRaw ?? null) as OpportunityType | null;
     const band = q['band'];
     if (band && !scoreBandSchema.safeParse(band).success) {
       return err(c, 400, 'BAD_QUERY', `invalid band: ${band}`);
@@ -53,9 +61,15 @@ export const opportunitiesRoute = new Hono()
     const limit = q['limit'] ? Number(q['limit']) : 50;
     const offset = q['offset'] ? Number(q['offset']) : 0;
     const overfetch = band ? { limit: 200, offset: 0 } : { limit, offset };
+
+    // Scope: explicit type wins; otherwise the eye's opportunity types
+    // (career/all/control with no type → no IN filter = legacy "everything").
+    const eyeTypes = OPPORTUNITY_TYPES_BY_EYE[eye];
+    const useTypesFilter = !oppType && eyeTypes.length > 0 && eye !== 'all' && eye !== 'control';
+
     const { items, total: _total } = nodes.list({
       type: 'OPPORTUNITY',
-      ...(oppType ? { opportunity_type: opportunityTypeSchema.parse(oppType) } : {}),
+      ...(oppType ? { opportunity_type: oppType } : useTypesFilter ? { opportunity_types: eyeTypes } : {}),
       ...(q['status'] ? { status: q['status'] } : {}),
       ...(q['q'] ? { q: q['q'] } : {}),
       ...(q['sort'] ? { sort: q['sort'] } : {}),
@@ -67,9 +81,17 @@ export const opportunitiesRoute = new Hono()
 
     const paged = band ? filtered.slice(offset, offset + limit) : filtered;
 
-    // board=true → grouped-by-status columns for the FE pipeline board (JOB statuses in pipeline order).
+    // board=true → grouped-by-status columns for the FE pipeline board.
+    // Columns follow the explicit type when given, otherwise the eye's slice
+    // (career/all/control default to JOB statuses — backward compatible).
     if (q['board'] === 'true') {
-      const columns = JOB_STATUSES.map((status) => ({
+      const jobBoardDefault = eye === 'career' || eye === 'all' || eye === 'control';
+      const statuses = oppType
+        ? STATUS_BY_OPPORTUNITY_TYPE[oppType]
+        : jobBoardDefault
+          ? JOB_PIPELINE_STATUSES
+          : boardStatusesForEye(eye);
+      const columns = statuses.map((status) => ({
         status,
         items: filtered.filter((n) => n.status === status),
       }));

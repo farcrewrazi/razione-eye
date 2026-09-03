@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
+  SIGNAL_TYPES,
+  SIGNAL_TYPES_BY_EYE,
   bandForScore,
   createSignalSchema,
   signalDispositionSchema,
@@ -11,6 +13,7 @@ import {
 import { getCtx, err } from './http-util.ts';
 import { nodeEventsHandler } from './events.ts';
 import { promoteSignal } from './signal-promotion.ts';
+import { parseEyeQuery } from './eye.ts';
 
 const promoteSignalSchema = z
   .object({
@@ -41,6 +44,14 @@ export const signalsRoute = new Hono()
       return err(c, 400, 'BAD_QUERY', `invalid signal_type: ${signalType}`);
     }
 
+    // Eye scoping (docs/07 §Eye scoping): SIGNAL_TYPES_BY_EYE per eye.
+    // An explicit ?signal_type= wins when both are given. Eyes whose set is
+    // every SIGNAL type (all/signal/control) filter nothing — legacy behavior.
+    const eyeParsed = parseEyeQuery(q['eye']);
+    if ('error' in eyeParsed) return err(c, 400, 'BAD_QUERY', eyeParsed.error);
+    const allowed = signalType ? [signalType] : SIGNAL_TYPES_BY_EYE[eyeParsed.eye];
+    const restricts = allowed.length < SIGNAL_TYPES.length;
+
     const { items, total } = nodes.list({
       type: 'SIGNAL',
       ...(disposition ? { status: disposition } : {}),
@@ -50,11 +61,11 @@ export const signalsRoute = new Hono()
     });
 
     // signal_type lives in the data blob — filter post-query (single-user scale).
-    const filtered = signalType
-      ? items.filter((n: (typeof items)[number]) => (n.data as SignalData).signal_type === signalType)
+    const filtered = restricts
+      ? items.filter((n) => (allowed as readonly string[]).includes(String((n.data as SignalData).signal_type)))
       : items;
 
-    return c.json({ items: filtered, total: signalType ? filtered.length : total });
+    return c.json({ items: filtered, total: restricts ? filtered.length : total });
   })
   .post('/', async (c) => {
     const { nodes, events } = getCtx(c);

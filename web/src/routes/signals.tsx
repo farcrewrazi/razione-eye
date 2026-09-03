@@ -17,6 +17,8 @@ import type { PromoteSignalData, Signal, SignalDisposition, SignalSource, Signal
 import { SIGNAL_DISPOSITIONS, SIGNAL_TYPES } from '@/api/types'
 import { EmptyState, PageHeader, StatusBadge } from '@/components/common'
 import { Badge, Button, Card, Input, Select, Skeleton, Textarea, useToast } from '@/components/ui'
+import { useEyeFocus } from '@/hooks/useEyeFocus'
+import { CONTROL_SIGNAL_TYPES } from '@/lib/eyes'
 import { timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -57,15 +59,29 @@ interface NewSignalForm {
   url: string
 }
 
-function NewSignalPanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+function NewSignalPanel({
+  open,
+  onToggle,
+  defaultType,
+}: {
+  open: boolean
+  onToggle: () => void
+  /** Focused-eye default (JOB_POSTING for Career, GEM_CALL for Signal, …). */
+  defaultType: SignalType
+}) {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const [form, setForm] = useState<NewSignalForm>({
-    signal_type: 'JOB_POSTING',
+    signal_type: defaultType,
     source: 'manual',
     content: '',
     url: '',
   })
+
+  // Track the eye default when the panel is opened under a different focus.
+  useEffect(() => {
+    if (open) setForm((f) => ({ ...f, signal_type: defaultType }))
+  }, [open, defaultType])
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -593,19 +609,29 @@ function SignalRow({ s, onDisposition }: {
 export function SignalsPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const { eye, def, focused } = useEyeFocus()
   const [disposition, setDisposition] = useState<SignalDisposition | ''>('')
   const [signalType, setSignalType] = useState<SignalType | ''>('')
   const [formOpen, setFormOpen] = useState(false)
   /** Signal queued for the promote dialog (T1.12). */
   const [promoting, setPromoting] = useState<Signal | null>(null)
 
+  /*
+   * Eye filter (T1.13): eyes with signal types seed the type filter — the
+   * backend is asked for them plus the ops types (SOCIAL_POST / COMMENT) that
+   * stay visible in every eye. Manual `signal_type` selection overrides.
+   */
+  const defaultType = focused && def.signalTypes.length > 0 ? def.signalTypes[0] : 'JOB_POSTING'
+  const eyeTypes = focused && def.signalTypes.length > 0 ? def.signalTypes : null
+  const serverType = signalType || (eyeTypes && eyeTypes.length === 1 ? eyeTypes[0] : undefined)
+
   const params = {
     disposition: disposition || undefined,
-    signal_type: signalType || undefined,
+    signal_type: serverType,
     limit: 100,
   }
   const { data, isPending, isError, error, refetch } = useQuery({
-    queryKey: ['signals', params],
+    queryKey: ['signals', params, eye],
     queryFn: () => listSignals(params),
     placeholderData: (prev) => prev,
   })
@@ -625,8 +651,12 @@ export function SignalsPage() {
     },
   })
 
-  const items = data?.items ?? []
-  const total = data?.total ?? 0
+  const allowed = signalType
+    ? null // explicit manual selection — the server already filtered
+    : eyeTypes
+      ? [...eyeTypes, ...CONTROL_SIGNAL_TYPES]
+      : null
+  const items = (data?.items ?? []).filter((s) => !allowed || allowed.includes(s.data.signal_type))
   const newCount = items.filter((s) => s.status === 'NEW').length
 
   const onDisposition = (id: string, next: SignalDisposition): void => {
@@ -643,7 +673,11 @@ export function SignalsPage() {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Signals"
-        subtitle="Raw detections awaiting triage — promote or dismiss."
+        subtitle={
+          focused
+            ? `${def.label} detections${eyeTypes ? ` — ${eyeTypes.join(' + ')}` : ''} — promote or dismiss.`
+            : 'Raw detections awaiting triage — promote or dismiss.'
+        }
         actions={
           <Button size="sm" variant={formOpen ? 'outline' : 'default'} onClick={() => setFormOpen((o) => !o)}>
             <Plus className="size-3.5" />
@@ -681,12 +715,12 @@ export function SignalsPage() {
           ))}
         </Select>
         <span className="ml-auto font-mono text-[11px] tracking-wider text-[var(--color-muted)] tabular-nums">
-          {isPending ? '…' : `${total} TOTAL`}
+          {isPending ? '…' : `${items.length} TOTAL`}
           {!isPending && disposition === 'NEW' ? ` · ${newCount} AWAITING TRIAGE` : ''}
         </span>
       </div>
 
-      <NewSignalPanel open={formOpen} onToggle={() => setFormOpen((o) => !o)} />
+      <NewSignalPanel open={formOpen} onToggle={() => setFormOpen((o) => !o)} defaultType={defaultType} />
 
       {/* Inbox */}
       {isPending ? (
@@ -711,11 +745,13 @@ export function SignalsPage() {
       ) : items.length === 0 ? (
         <EmptyState
           icon={<Inbox />}
-          title={disposition || signalType ? 'No matches' : 'Inbox is clear'}
+          title={disposition || signalType ? 'No matches' : focused ? `No ${def.shortLabel} Eye signals` : 'Inbox is clear'}
           hint={
             disposition || signalType
               ? 'Nothing matches the current filters — clear them to see the full inbox.'
-              : 'New detections from the scouts and manual entries will land here.'
+              : focused
+                ? `${def.label} detections land here — reset the focus to All for the full inbox.`
+                : 'New detections from the scouts and manual entries will land here.'
           }
         />
       ) : (

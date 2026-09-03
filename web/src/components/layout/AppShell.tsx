@@ -3,11 +3,13 @@
  * Dark command-center aesthetic: dense, crisp, single accent color.
  */
 
-import { useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router'
+import { useEffect, useState } from 'react'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { Link } from 'react-router'
-import { ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { ChevronsLeft, ChevronsRight, X } from 'lucide-react'
 import { Toaster } from '@/components/ui/toast'
+import { EyeSwitcher } from '@/components/eye/EyeSwitcher'
+import { EyeFocusProvider, useEyeFocus } from '@/hooks/useEyeFocus'
 import { NAV_ITEMS, crumbsFor } from '@/lib/nav'
 import { cn } from '@/lib/utils'
 
@@ -42,6 +44,11 @@ function ApiModeBadge() {
 }
 
 function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const { def, focused } = useEyeFocus()
+  const visibleItems = focused
+    ? NAV_ITEMS.filter((item) => def.navAllow.includes(item.to))
+    : NAV_ITEMS
+
   return (
     <aside
       className={cn(
@@ -66,10 +73,10 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
         )}
       </div>
 
-      {/* Nav */}
+      {/* Nav — narrowed to the focused eye's navAllow (ALL shows everything) */}
       <nav className="flex-1 overflow-y-auto px-2 py-3" aria-label="Primary">
         <ul className="flex flex-col gap-0.5">
-          {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+          {visibleItems.map(({ to, label, icon: Icon }) => (
             <li key={to}>
               <NavLink
                 to={to}
@@ -91,6 +98,11 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
             </li>
           ))}
         </ul>
+        {focused && !collapsed && (
+          <p className="mt-3 border-t border-[var(--color-border)] px-2.5 pt-3 font-mono text-[10px] tracking-widest text-[var(--color-accent)]/80">
+            {def.shortLabel.toUpperCase()} FOCUS · {visibleItems.length}/{NAV_ITEMS.length}
+          </p>
+        )}
       </nav>
 
       {/* Bottom: API mode + collapse toggle */}
@@ -116,6 +128,29 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
         </button>
       </div>
     </aside>
+  )
+}
+
+/** Active-focus chip — visible whenever an eye is focused, X resets to ALL. */
+function FocusChip() {
+  const { def, focused, reset } = useEyeFocus()
+  if (!focused) return null
+  const Icon = def.icon
+  return (
+    <span className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-2 font-mono text-[10px] tracking-wider text-[var(--color-accent)]">
+      <Icon className="size-3 shrink-0" strokeWidth={2} />
+      <span className="hidden lg:inline">FOCUS: {def.shortLabel.toUpperCase()}</span>
+      <span className="lg:hidden">{def.shortLabel.toUpperCase()}</span>
+      <button
+        type="button"
+        onClick={reset}
+        aria-label="Reset eye focus to All"
+        title="Reset to All Eyes"
+        className="grid size-4 place-items-center rounded-sm transition-colors hover:bg-[var(--color-accent)]/20"
+      >
+        <X className="size-3" />
+      </button>
+    </span>
   )
 }
 
@@ -156,8 +191,10 @@ function TopBar() {
           )}
         </ol>
       </nav>
-      <div className="flex shrink-0 items-center gap-4">
-        <time className="font-mono text-xs tracking-wider text-[var(--color-muted)] tabular-nums">
+      <div className="flex shrink-0 items-center gap-3">
+        <EyeSwitcher />
+        <FocusChip />
+        <time className="hidden font-mono text-xs tracking-wider text-[var(--color-muted)] tabular-nums sm:inline">
           {date}
         </time>
         {/* Razi Profile access — subtle "R" avatar */}
@@ -179,26 +216,52 @@ function TopBar() {
   )
 }
 
+/**
+ * Focus redirect — when the focused eye changes and the current route is no
+ * longer in the eye's navAllow, bounce to '/' (the per-eye home anchor) so the
+ * user never sits on a surface their sidebar can't reach. '/profile' is an
+ * avatar route outside the sidebar — never blocked. Deep links to hidden
+ * routes still render; the guard only fires on eye changes.
+ */
+function EyeFocusRedirect() {
+  const { eye, def } = useEyeFocus()
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (eye === 'ALL' || pathname === '/profile') return
+    const base = `/${pathname.split('/')[1] ?? ''}`
+    if (!def.navAllow.includes(base)) {
+      navigate('/', { replace: true })
+    }
+  }, [eye, def, pathname, navigate])
+
+  return null
+}
+
 export default function AppShell() {
   const [collapsed, setCollapsed] = useState(false)
 
   return (
-    <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
-      <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
-      <div
-        className={cn(
-          'flex min-h-screen flex-col transition-[padding] duration-200',
-          collapsed ? 'pl-14' : 'pl-60',
-        )}
-      >
-        <TopBar />
-        <main className="flex-1">
-          <div className="mx-auto w-full max-w-6xl px-6 py-6">
-            <Outlet />
-          </div>
-        </main>
+    <EyeFocusProvider>
+      <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
+        <EyeFocusRedirect />
+        <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} />
+        <div
+          className={cn(
+            'flex min-h-screen flex-col transition-[padding] duration-200',
+            collapsed ? 'pl-14' : 'pl-60',
+          )}
+        >
+          <TopBar />
+          <main className="flex-1">
+            <div className="mx-auto w-full max-w-6xl px-6 py-6">
+              <Outlet />
+            </div>
+          </main>
+        </div>
+        <Toaster />
       </div>
-      <Toaster />
-    </div>
+    </EyeFocusProvider>
   )
 }
