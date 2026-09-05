@@ -24,13 +24,24 @@ export function createApp(db: DatabaseSync): { app: Hono; ctx: AppContext } {
   const ctx = makeContext(db);
   const app = new Hono();
 
+  // CORS origins: localhost for dev + CORS_ORIGIN env (comma-separated)
+  // for production, e.g. CORS_ORIGIN=https://eye.example.com.
+  // Same-origin deploys (frontend nginx proxying /api/ to backend) don't
+  // need CORS, but direct browser→API calls do.
+  const extraOrigins = (process.env.CORS_ORIGIN ?? '')
+    .split(',')
+    .map((s) => s.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+
   app.use(
     '/api/*',
     cors({
       origin: (origin) => {
         // Localhost dev only (FE dev server on any port).
         if (!origin) return undefined;
-        return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ? origin : undefined;
+        if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return origin;
+        if (extraOrigins.includes(origin)) return origin;
+        return undefined;
       },
     }),
   );

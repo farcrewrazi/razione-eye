@@ -1,0 +1,18 @@
+# Root docker build context ignores (keeps images small + reproducible).
+node_modules
+dist
+*.tsbuildinfo
+server/data
+server/node_modules
+web/node_modules
+web/dist
+packages/*/node_modules
+packages/*/dist
+.git
+.gitignore
+.opencode
+docs
+.env
+.env.local
+*.local
+.DS_Store

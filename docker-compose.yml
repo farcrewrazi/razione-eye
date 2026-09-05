@@ -1,0 +1,58 @@
+# RaziOne Eye — production stack (separate backend + frontend containers).
+#
+# Usage on VPS:
+#   cp .env.example .env   # then set CORS_ORIGIN to your domain
+#   docker compose up -d --build
+#
+# Topology:
+#   browser (https via Nginx + Certbot on host) → frontend 127.0.0.1:8080
+#     → nginx proxies /api/ → backend:8787 (compose network only)
+#   SQLite lives in the `razione-data` named volume (survives rebuilds).
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: razione-eye-backend:latest
+    container_name: razione-eye-backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: "8787"
+      RAZIONE_DB_PATH: /app/server/data/razione-eye.db
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+    expose:
+      - "8787"
+    volumes:
+      - razione-data:/app/server/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8787/api/health').then(r => { if (!r.ok) process.exit(1) })"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+      args:
+        VITE_API_MODE: ${VITE_API_MODE:-real}
+    image: razione-eye-frontend:latest
+    container_name: razione-eye-frontend
+    depends_on:
+      backend:
+        condition: service_started
+    # Bound to localhost only — public entry is host Nginx (:80/:443) → 8080,
+    # with TLS from Certbot (see nginx-vps.example.conf).
+    ports:
+      - "${FRONTEND_PORT:-127.0.0.1:8080}:80"
+    restart: unless-stopped
+
+volumes:
+  razione-data:
+    name: razione-data
