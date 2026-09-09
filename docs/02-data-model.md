@@ -410,4 +410,4 @@ The Agents screen (v0.1 module 6) renders this registry: what's running, what ra
 
 ## 9. Storage note
 
-Engine choice is **OPEN** (D-004, Phase 0 kickoff). The model above is deliberately storage-agnostic: it works on a relational schema with join tables, a document store with reference fields, or a real graph DB. The edge list in Section 5 is the contract — the engine just implements it.
+Decided: **PostgreSQL 17-alpine** (`db` service, `pgdata` volume) accessed via `pg` Pool (`server/src/db.ts`, `DATABASE_URL`; `db:5432` in compose, `localhost:5432` locally). Tables (`server/src/schema.sql`, auto-migrated on boot): `nodes`, `edges`, `events`, `gate_actions` — the Section 5 edge list is implemented as rows in `edges`. Backups: `pg_dump --format=custom` snapshots in the `pgbackups` volume (`POST /api/backup`, keep 30); restore with `pg_restore --clean --if-exists -d "$DATABASE_URL" <file.dump>`. Legacy SQLite imports are one-off via `pnpm --filter @razione-eye/server migrate:sqlite -- --from <file.db>`.

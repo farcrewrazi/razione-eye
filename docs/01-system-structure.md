@@ -111,8 +111,9 @@ Every feature in RaziOne Eye must fit one stage of this cycle. If it doesn't, it
 └──────────────────────────────┬───────────────────────────────────┘
                                │
 ┌──────────────────────────────▼───────────────────────────────────┐
-│  L1 · STORAGE — single-user, local-first store                   │
-│  ─ Engine choice OPEN until Phase 0 kickoff (see decisions-log)  │
+│  L1 · STORAGE — Postgres 17, single-user                          │
+│  ─ `db` service (postgres:17-alpine, `pgdata` volume) + `pg` Pool  │
+│    via DATABASE_URL; `pgbackups` volume holds pg_dump snapshots    │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -172,9 +173,11 @@ Payoff queries (built as bonus phase B1, once data exists):
 
 Full node/edge definitions: [02-data-model.md](02-data-model.md).
 
-### 3.4 Storage (L1) — local-first, single user
+### 3.4 Storage (L1) — Postgres 17, single user
 
-Requirements (stack decision deferred to Phase 0, D-004):
+Decided (D-004): PostgreSQL 17-alpine (`db` service in compose) + `pg` Pool in `server/src/db.ts`, configured via `DATABASE_URL` (`@db:5432` in compose, `@localhost:5432` locally — `db` publishes `127.0.0.1:5432`). Schema auto-migrates from `schema.sql` on boot; `pg_isready` healthcheck gates the backend (`depends_on: service_healthy`). Backups are `pg_dump --format=custom` snapshots in the `pgbackups` volume (`POST /api/backup`, keep 30); restore with `pg_restore`. Legacy SQLite files migrate one-off via `pnpm --filter @razione-eye/server migrate:sqlite -- --from <file.db>`.
+
+Requirements met:
 
 | Requirement | Why |
 |---|---|

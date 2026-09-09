@@ -1,10 +1,13 @@
 /**
  * RaziOne Eye — real-mode fetch wrapper (contract §0).
  *
- * - Base path `/api/*` (dev server proxies to http://localhost:8787).
+ * - Base path `/api/*` (dev server proxies to http://localhost:8787,
+ *   production nginx proxies /api/ → backend:8787).
  * - JSON in/out; non-2xx responses parse the `{error:{code,message}}`
  *   envelope and throw `ApiError` (code: VALIDATION | INVALID_STATUS |
- *   BAD_QUERY | NOT_FOUND | INTERNAL).
+ *   BAD_QUERY | NOT_FOUND | INTERNAL | UPSTREAM).
+ * - Non-JSON error bodies (e.g. nginx 502 HTML when the backend is down)
+ *   map to `UPSTREAM` with a short friendly message — never raw HTML.
  */
 
 import type { ErrorEnvelope } from './types'
@@ -51,7 +54,27 @@ export async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> 
     if (envelope && typeof envelope.error?.code === 'string' && typeof envelope.error?.message === 'string') {
       throw new ApiError(envelope.error.code, envelope.error.message, response.status)
     }
-    throw new ApiError('INTERNAL', text || `Request failed with status ${response.status}`, response.status)
+    // Proxy / gateway HTML (nginx 502/504 when backend is down) or any
+    // non-JSON body: collapse to a friendly code so EmptyState hints don't
+    // dump raw `<html>...` markup.
+    const contentType = response.headers.get('content-type') ?? ''
+    const looksLikeHtml = contentType.includes('html') || /<\s*html|<\s*center>/i.test(text.slice(0, 1024))
+    if (looksLikeHtml || payload === null) {
+      const detail =
+        response.status === 502
+          ? 'Backend unavailable (Bad Gateway) — is the API container running?'
+          : response.status === 504
+            ? 'Backend timed out (Gateway Timeout) — retry in a moment.'
+            : `Request failed with status ${response.status} (non-JSON response).`
+      throw new ApiError('UPSTREAM', detail, response.status)
+    }
+    throw new ApiError('INTERNAL', `Request failed with status ${response.status}`, response.status)
+  }
+
+  if (payload === null && text) {
+    // 2xx but non-JSON (shouldn't happen for /api/*) — fail loudly instead
+    // of returning null and crashing downstream.
+    throw new ApiError('UPSTREAM', 'Unexpected non-JSON response from API.', response.status)
   }
 
   return payload as T

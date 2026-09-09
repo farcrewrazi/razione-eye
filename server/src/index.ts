@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import type { DatabaseSync } from 'node:sqlite';
+import type { Pool } from 'pg';
 import { makeContext, type AppContext } from './context.ts';
 import { healthRoute } from './health.ts';
 import { profileRoute } from './profile.ts';
@@ -20,7 +20,7 @@ import { importRoute } from './import/import-api.ts';
 import { runSeed } from './seed-service.ts';
 import { runBackup } from './backup-service.ts';
 
-export function createApp(db: DatabaseSync): { app: Hono; ctx: AppContext } {
+export function createApp(db: Pool): { app: Hono; ctx: AppContext } {
   const ctx = makeContext(db);
   const app = new Hono();
 
@@ -69,18 +69,18 @@ export function createApp(db: DatabaseSync): { app: Hono; ctx: AppContext } {
     .route('/', dashboardRoute)
     .route('/import', importRoute)
     .route('/gate', gateRoute)
-    .get('/daily-brief/morning', (c) => {
+    .get('/daily-brief/morning', async (c) => {
       const eyeParsed = parseEyeQuery(c.req.query('eye'));
       if ('error' in eyeParsed) return err(c, 400, 'BAD_QUERY', eyeParsed.error);
-      return c.json(morningBrief(getCtx(c), new Date(), eyeParsed.eye));
+      return c.json(await morningBrief(getCtx(c), new Date(), eyeParsed.eye));
     })
-    .get('/daily-brief/evening', (c) => {
+    .get('/daily-brief/evening', async (c) => {
       const eyeParsed = parseEyeQuery(c.req.query('eye'));
       if ('error' in eyeParsed) return err(c, 400, 'BAD_QUERY', eyeParsed.error);
-      return c.json(eveningBrief(getCtx(c), new Date(), eyeParsed.eye));
+      return c.json(await eveningBrief(getCtx(c), new Date(), eyeParsed.eye));
     })
-    .post('/seed', (c) => c.json(runSeed(ctx)))
-    .post('/backup', (c) => c.json(runBackup(ctx.db)));
+    .post('/seed', async (c) => c.json(await runSeed(ctx)))
+    .post('/backup', async (c) => c.json(await runBackup()));
 
   app.route('/api', api);
 

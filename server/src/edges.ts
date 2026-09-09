@@ -1,7 +1,7 @@
 /**
  * Edge repository — generic edge store + typed helpers for the doc 02 §5 catalog.
  */
-import type { DatabaseSync } from 'node:sqlite';
+import type { Pool } from 'pg';
 import type { Edge, EdgeType } from '@razione-eye/shared';
 import { ulid, nowIso } from './ulid.ts';
 
@@ -10,8 +10,23 @@ interface EdgeRow {
   from_id: string;
   to_id: string;
   edge_type: string;
-  data: string | null;
-  created_at: string;
+  /** JSONB — pg returns parsed objects; accept string|object|null. */
+  data: unknown;
+  created_at: string | Date;
+}
+
+/** Parse JSON text or pass through already-parsed pg JSONB values. */
+function parseData(value: unknown): Record<string, unknown> | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === 'object') return value as Record<string, unknown>;
+  return null;
 }
 
 function rowToEdge(row: EdgeRow): Edge {
@@ -20,132 +35,131 @@ function rowToEdge(row: EdgeRow): Edge {
     from_id: row.from_id,
     to_id: row.to_id,
     edge_type: row.edge_type as EdgeType,
-    data: row.data ? (JSON.parse(row.data) as Record<string, unknown>) : null,
-    created_at: row.created_at,
+    data: parseData(row.data),
+    created_at: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
   };
 }
 
 export class EdgesRepo {
-  private readonly db: DatabaseSync;
+  private readonly pool: Pool;
 
-  constructor(db: DatabaseSync) {
-    this.db = db;
+  constructor(pool: Pool) {
+    this.pool = pool;
   }
 
-  create(
+  async create(
     fromId: string,
     toId: string,
     edgeType: EdgeType,
     data?: Record<string, unknown>,
-  ): Edge {
+  ): Promise<Edge> {
     const id = ulid();
     const now = nowIso();
-    this.db
-      .prepare(
-        'INSERT INTO edges (id, from_id, to_id, edge_type, data, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      )
-      .run(id, fromId, toId, edgeType, data ? JSON.stringify(data) : null, now);
-    const edge = this.getById(id);
+    await this.pool.query(
+      'INSERT INTO edges (id, from_id, to_id, edge_type, data, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+      [id, fromId, toId, edgeType, data ? JSON.stringify(data) : null, now],
+    );
+    const edge = await this.getById(id);
     if (!edge) throw new Error(`failed to read back edge ${id}`);
     return edge;
   }
 
-  getById(id: string): Edge | null {
-    const row = this.db.prepare('SELECT * FROM edges WHERE id = ?').get(id) as EdgeRow | undefined;
+  async getById(id: string): Promise<Edge | null> {
+    const res = await this.pool.query('SELECT * FROM edges WHERE id = $1', [id]);
+    const row = res.rows[0] as EdgeRow | undefined;
     return row ? rowToEdge(row) : null;
   }
 
-  delete(id: string): boolean {
-    const res = this.db.prepare('DELETE FROM edges WHERE id = ?').run(id);
-    return res.changes > 0;
+  async delete(id: string): Promise<boolean> {
+    const res = await this.pool.query('DELETE FROM edges WHERE id = $1', [id]);
+    return (res.rowCount ?? 0) > 0;
   }
 
   /** Outgoing edges from a node (optionally filtered by type). */
-  outgoing(fromId: string, edgeType?: EdgeType): Edge[] {
-    const rows = (
-      edgeType
-        ? this.db
-            .prepare('SELECT * FROM edges WHERE from_id = ? AND edge_type = ? ORDER BY created_at')
-            .all(fromId, edgeType)
-        : this.db
-            .prepare('SELECT * FROM edges WHERE from_id = ? ORDER BY created_at')
-            .all(fromId)
-    ) as unknown as EdgeRow[];
-    return rows.map(rowToEdge);
+  async outgoing(fromId: string, edgeType?: EdgeType): Promise<Edge[]> {
+    const res = edgeType
+      ? await this.pool.query(
+          'SELECT * FROM edges WHERE from_id = $1 AND edge_type = $2 ORDER BY created_at',
+          [fromId, edgeType],
+        )
+      : await this.pool.query('SELECT * FROM edges WHERE from_id = $1 ORDER BY created_at', [
+          fromId,
+        ]);
+    return (res.rows as unknown as EdgeRow[]).map(rowToEdge);
   }
 
   /** Incoming edges to a node (optionally filtered by type). */
-  incoming(toId: string, edgeType?: EdgeType): Edge[] {
-    const rows = (
-      edgeType
-        ? this.db
-            .prepare('SELECT * FROM edges WHERE to_id = ? AND edge_type = ? ORDER BY created_at')
-            .all(toId, edgeType)
-        : this.db
-            .prepare('SELECT * FROM edges WHERE to_id = ? ORDER BY created_at')
-            .all(toId)
-    ) as unknown as EdgeRow[];
-    return rows.map(rowToEdge);
+  async incoming(toId: string, edgeType?: EdgeType): Promise<Edge[]> {
+    const res = edgeType
+      ? await this.pool.query(
+          'SELECT * FROM edges WHERE to_id = $1 AND edge_type = $2 ORDER BY created_at',
+          [toId, edgeType],
+        )
+      : await this.pool.query('SELECT * FROM edges WHERE to_id = $1 ORDER BY created_at', [toId]);
+    return (res.rows as unknown as EdgeRow[]).map(rowToEdge);
   }
 
   /** Idempotent lookup: does an exact (from,to,type) edge already exist? */
-  exists(fromId: string, toId: string, edgeType: EdgeType): boolean {
-    const row = this.db
-      .prepare('SELECT 1 AS x FROM edges WHERE from_id = ? AND to_id = ? AND edge_type = ? LIMIT 1')
-      .get(fromId, toId, edgeType);
-    return row !== undefined;
+  async exists(fromId: string, toId: string, edgeType: EdgeType): Promise<boolean> {
+    const res = await this.pool.query(
+      'SELECT 1 AS x FROM edges WHERE from_id = $1 AND to_id = $2 AND edge_type = $3 LIMIT 1',
+      [fromId, toId, edgeType],
+    );
+    return res.rows.length > 0;
   }
 
   /** Create unless an exact (from,to,type) edge already exists (seed idempotency). */
-  ensure(
+  async ensure(
     fromId: string,
     toId: string,
     edgeType: EdgeType,
     data?: Record<string, unknown>,
-  ): Edge {
-    const existing = this.db
-      .prepare('SELECT * FROM edges WHERE from_id = ? AND to_id = ? AND edge_type = ? LIMIT 1')
-      .get(fromId, toId, edgeType) as EdgeRow | undefined;
+  ): Promise<Edge> {
+    const res = await this.pool.query(
+      'SELECT * FROM edges WHERE from_id = $1 AND to_id = $2 AND edge_type = $3 LIMIT 1',
+      [fromId, toId, edgeType],
+    );
+    const existing = res.rows[0] as EdgeRow | undefined;
     if (existing) return rowToEdge(existing);
     return this.create(fromId, toId, edgeType, data);
   }
 
-  count(): number {
-    const row = this.db.prepare('SELECT COUNT(*) AS c FROM edges').get() as { c: number };
-    return row.c;
+  async count(): Promise<number> {
+    const res = await this.pool.query('SELECT COUNT(*) AS c FROM edges');
+    return Number(res.rows[0]?.c ?? 0);
   }
 
   // ── Typed helpers for the Phase-0 minimum catalog (+ owns) ──────────────
 
-  knows(personId: string, skillId: string): Edge {
+  async knows(personId: string, skillId: string): Promise<Edge> {
     return this.ensure(personId, skillId, 'knows');
   }
 
-  locatedIn(nodeId: string, locationId: string): Edge {
+  async locatedIn(nodeId: string, locationId: string): Promise<Edge> {
     return this.ensure(nodeId, locationId, 'located_in');
   }
 
-  hiring(companyId: string, opportunityId: string): Edge {
+  async hiring(companyId: string, opportunityId: string): Promise<Edge> {
     return this.ensure(companyId, opportunityId, 'hiring');
   }
 
-  belongsTo(opportunityId: string, companyId: string): Edge {
+  async belongsTo(opportunityId: string, companyId: string): Promise<Edge> {
     return this.ensure(opportunityId, companyId, 'belongs_to');
   }
 
-  matches(opportunityId: string, personId: string, score: number): Edge {
+  async matches(opportunityId: string, personId: string, score: number): Promise<Edge> {
     return this.ensure(opportunityId, personId, 'matches', { score });
   }
 
-  hasProblem(companyId: string, problemId: string): Edge {
+  async hasProblem(companyId: string, problemId: string): Promise<Edge> {
     return this.ensure(companyId, problemId, 'has_problem');
   }
 
-  solvedBy(problemId: string, solutionId: string): Edge {
+  async solvedBy(problemId: string, solutionId: string): Promise<Edge> {
     return this.ensure(problemId, solutionId, 'solved_by');
   }
 
-  owns(personId: string, companyOrProjectId: string): Edge {
+  async owns(personId: string, companyOrProjectId: string): Promise<Edge> {
     return this.ensure(personId, companyOrProjectId, 'owns');
   }
 }

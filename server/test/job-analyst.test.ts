@@ -7,12 +7,13 @@
  * Part 3: API integration — agent run, idempotency/force, ranking, NBA,
  *         dashboard, signal promotion, events.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Hono } from 'hono';
+import type { Pool } from 'pg';
 import type { Node, PersonData } from '@razione-eye/shared';
 import { bandForScore } from '@razione-eye/shared';
-import { openDb } from '../src/db.ts';
 import { createApp } from '../src/index.ts';
+import { openTestDb, resetTestDb, closeTestDb } from './helpers.ts';
 import type { AppContext } from '../src/context.ts';
 import {
   detectAiMarkers,
@@ -255,11 +256,21 @@ describe('job-analyst — next_action due dates (T1.3.5)', () => {
 
 // ─── Part 3: API integration ─────────────────────────────────────────────────
 
+let pool: Pool;
 let app: Hono;
 let ctx: AppContext;
 
-beforeEach(() => {
-  ({ app, ctx } = createApp(openDb({ path: ':memory:' })));
+beforeAll(async () => {
+  pool = await openTestDb();
+  ({ app, ctx } = createApp(pool));
+});
+
+beforeEach(async () => {
+  await resetTestDb(pool);
+});
+
+afterAll(async () => {
+  await closeTestDb(pool);
 });
 
 async function json(res: Response): Promise<Record<string, unknown>> {
@@ -318,8 +329,8 @@ const SEED_OPPS = [
 async function seedAndCreateOpps(): Promise<string[]> {
   await app.request('/api/seed', { method: 'POST' });
   // AlphaTech is a known software house → company_match 90 (needed for PRIORITY).
-  // (No POST /api/companies endpoint — create via the repo, same in-memory DB.)
-  ctx.nodes.create({ type: 'COMPANY', name: 'AlphaTech', source: 'manual', data: { industry: 'Software / SaaS' } });
+  // (No POST /api/companies endpoint — create via the repo, same test database.)
+  await ctx.nodes.create({ type: 'COMPANY', name: 'AlphaTech', source: 'manual', data: { industry: 'Software / SaaS' } });
   const ids: string[] = [];
   for (const opp of SEED_OPPS) {
     const res = await postJson('/api/opportunities', opp);

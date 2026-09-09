@@ -1,7 +1,7 @@
 # RaziOne Eye
 
 Single-user, local-first career + business operations command center.
-Monorepo (`pnpm` workspaces): `server/` (Hono API + SQLite), `web/` (React + Vite SPA), `packages/shared` (schemas/types).
+Monorepo (`pnpm` workspaces): `server/` (Hono API + PostgreSQL 17 via `pg`), `web/` (React + Vite SPA), `packages/shared` (schemas/types).
 
 ## Quick start (local dev)
 
@@ -21,14 +21,18 @@ Separate containers behind one origin (no CORS issues for app traffic):
 browser ──https──▶ Nginx (host :443, Certbot TLS) ──▶ frontend 127.0.0.1:8080 (nginx)
                                                         ├── /  → SPA (dist/)
                                                         └── /api/ → proxy_pass backend:8787
-                     backend data ◀── volume `razione-data` ── backend container
+                     backend ──DATABASE_URL──▶ db:5432 (postgres:17-alpine, compose network)
+                       ├── volume `pgdata` → /var/lib/postgresql/data (survives rebuilds)
+                       └── volume `pgbackups` → /backups + /app/server/backups (pg_dump snapshots)
+                     db 127.0.0.1:5432 → loopback only, for local dev/tests (psql, vitest)
 ```
 
 | Piece | Source | Notes |
 |---|---|---|
-| `backend` | `server/Dockerfile` | Node 22, `node src/dev.ts`, seeds idempotently, `:8787`, healthcheck `GET /api/health` |
+| `db` | `postgres:17-alpine` | `pg_isready` healthcheck; backend waits on `service_healthy`; publishes `127.0.0.1:5432` for local dev only |
+| `backend` | `server/Dockerfile` | Node 22, `node src/dev.ts`, `DATABASE_URL=postgres://…@db:5432/…`, schema auto-migrates on boot, seeds idempotently, `:8787`, healthcheck `GET /api/health` |
 | `frontend` | `web/Dockerfile` + `web/nginx.conf` | Vite build (`VITE_API_MODE=real`) + nginx, SPA fallback, `/api/` proxy, `:80` in container |
-| Orchestration | `docker-compose.yml` | Named volume `razione-data` for SQLite |
+| Orchestration | `docker-compose.yml` | Named volumes `pgdata` (DB files) + `pgbackups` (dumps) |
 | Public TLS | `nginx-vps.example.conf` | Host-level Nginx → `127.0.0.1:8080`, certificates via Certbot |
 
 ## VPS deployment guideline
@@ -81,7 +85,7 @@ Why Nginx on the host instead of in compose: TLS certificates live naturally wit
 
 ### 3. Updates (data is preserved)
 
-SQLite lives in the named volume `razione-data`, so rebuilds/upgrades never wipe it:
+Postgres data lives in the named volume `pgdata`, dumps in `pgbackups`, so rebuilds/upgrades never wipe them:
 
 ```bash
 git pull
@@ -93,27 +97,36 @@ To start over with a fresh DB (destructive):
 
 ```bash
 docker compose down
-docker volume rm razione-data
+docker volume rm razione-eye-pgdata
 docker compose up -d --build
 ```
 
 ### 4. Backup & restore
 
-Fastest — copy the SQLite file out of the volume:
+Backups are `pg_dump` custom-format snapshots (`razione-eye-YYYYMMDD-HHMMSS.dump`), written by `POST /api/backup` (see `server/src/backup-service.ts`) or `pnpm backup` into the `pgbackups` volume (`/backups` on `db`, `/app/server/backups` on `backend`, `server/data/backups/` locally). Last 30 kept.
 
 ```bash
-# Backup
-docker run --rm -v razione-data:/data -v "$PWD":/backup alpine \
-  cp /data/razione-eye.db "/backup/razione-eye-$(date +%F).db"
+# Backup via API (prod)
+curl -X POST http://127.0.0.1:8080/api/backup
 
-# Restore (stop backend first)
+# Backup via pg_dump directly
+pg_dump "$DATABASE_URL" --format=custom -f "razione-eye-$(date +%F).dump"
+
+# List snapshots in the volume
+docker run --rm -v razione-eye-pgbackups:/backups alpine ls -lh /backups
+
+# Restore (stop backend first so nothing writes mid-restore)
 docker compose stop backend
-docker run --rm -v razione-data:/data -v "$PWD":/backup alpine \
-  cp /backup/razione-eye-YYYY-MM-DD.db /data/razione-eye.db
+pg_restore --clean --if-exists -d "$DATABASE_URL" /path/to/razione-eye-YYYYMMDD-HHMMSS.dump
 docker compose start backend
 ```
 
-There is also an in-app endpoint (`POST /api/backup`, see `server/src/backup-service.ts`) that writes timestamped copies under `server/data/backups/` (same volume).
+One-off SQLite → Postgres migration (legacy local DBs only):
+
+```bash
+DATABASE_URL=postgres://razione:razione@localhost:5432/razione_eye \
+  pnpm --filter @razione-eye/server migrate:sqlite -- --from ./server/data/razione-eye.db
+```
 
 ### 5. Configuration reference
 
@@ -122,6 +135,8 @@ There is also an in-app endpoint (`POST /api/backup`, see `server/src/backup-ser
 | Var | Required | Default | Meaning |
 |---|---|---|---|
 | `CORS_ORIGIN` | yes (prod) | — | Public origin(s), comma-separated, e.g. `https://eye.example.com`. Backend allows these + localhost. |
+| `DATABASE_URL` | yes | `postgres://razione:razione@db:5432/razione_eye` | Backend → Postgres. In compose host is `db`; locally use `@localhost:5432`. |
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | no | `razione_eye` / `razione` / `razione` | `db` service credentials; must match `DATABASE_URL`. |
 | `VITE_API_MODE` | no | `real` | Baked into the frontend at build time. Keep `real` in prod; changing it needs `docker compose up -d --build frontend`. |
 | `FRONTEND_PORT` | no | `127.0.0.1:8080` | Host binding for nginx. Keep the `127.0.0.1:` prefix. |
 
@@ -152,7 +167,7 @@ docker inspect razione-eye-backend --format '{{.State.Health.Status}}'
 
 ```bash
 pnpm build   # typecheck all workspaces
-pnpm test    # backend vitest suite
-pnpm seed    # idempotent seed (local)
-pnpm backup  # local backup helper
+pnpm test    # backend vitest suite (needs Postgres on 127.0.0.1:5432 or DATABASE_URL)
+pnpm seed    # idempotent seed (local, needs DATABASE_URL)
+pnpm backup  # local pg_dump snapshot helper
 ```

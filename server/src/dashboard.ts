@@ -15,7 +15,7 @@ import {
 } from '@razione-eye/shared';
 import type { AppContext } from './context.ts';
 import { PROFILE_PERSON_NAME } from './seed-service.ts';
-import { canonicalStackToken, scoreLocation } from './agents/rules.ts';
+import { canonicalStackToken } from './agents/rules.ts';
 import { actionableStatusesForType, opportunityTypesForEye } from './eye.ts';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -30,14 +30,14 @@ export interface NbaResult {
 // ─── NBA ─────────────────────────────────────────────────────────────────────
 
 /** Find the company node linked to an opportunity (belongs_to/hiring/name). */
-export function linkedCompany(ctx: AppContext, opportunity: Node): Node | null {
+export async function linkedCompany(ctx: AppContext, opportunity: Node): Promise<Node | null> {
   const { nodes, edges } = ctx;
-  for (const e of edges.outgoing(opportunity.id, 'belongs_to')) {
-    const n = nodes.getById(e.to_id);
+  for (const e of await edges.outgoing(opportunity.id, 'belongs_to')) {
+    const n = await nodes.getById(e.to_id);
     if (n?.type === 'COMPANY') return n;
   }
-  for (const e of edges.incoming(opportunity.id, 'hiring')) {
-    const n = nodes.getById(e.from_id);
+  for (const e of await edges.incoming(opportunity.id, 'hiring')) {
+    const n = await nodes.getById(e.from_id);
     if (n?.type === 'COMPANY') return n;
   }
   const name = opportunity.data['company'];
@@ -94,9 +94,9 @@ export function buildNbaReason(
  * other types) and band PRIORITY/APPLY; ties broken by soonest next_action due.
  * Null when nothing qualifies. No eye (default 'all') = today's JOB-only behavior.
  */
-export function nextBestAction(ctx: AppContext, now: Date = new Date(), eye: Eye = 'all'): NbaResult {
+export async function nextBestAction(ctx: AppContext, now: Date = new Date(), eye: Eye = 'all'): Promise<NbaResult> {
   const { nodes } = ctx;
-  const profile = nodes.findByTypeAndName('PERSON', PROFILE_PERSON_NAME);
+  const profile = await nodes.findByTypeAndName('PERSON', PROFILE_PERSON_NAME);
   const profileSkills = (profile?.data as PersonData | undefined)?.skills;
 
   // Legacy contract: with no eye (or all/control), NBA stays JOB-only — the
@@ -104,7 +104,7 @@ export function nextBestAction(ctx: AppContext, now: Date = new Date(), eye: Eye
   const types = eye === 'all' || eye === 'control' ? (['JOB'] as const) : opportunityTypesForEye(eye);
   if (types.length === 0) return { opportunity: null, reason: null, match_score: null };
 
-  const { items } = nodes.list({ type: 'OPPORTUNITY', opportunity_types: types, limit: 200, sort: '-score' });
+  const { items } = await nodes.list({ type: 'OPPORTUNITY', opportunity_types: types, limit: 200, sort: '-score' });
   const candidates = items
     .map((opp) => ({ opp, band: bandForScore(opp.score) }))
     .filter(
@@ -127,7 +127,7 @@ export function nextBestAction(ctx: AppContext, now: Date = new Date(), eye: Eye
 
   const { opp, band } = candidates[0]!;
   return {
-    opportunity: { ...opp, band, company: linkedCompany(ctx, opp) },
+    opportunity: { ...opp, band, company: await linkedCompany(ctx, opp) },
     reason: buildNbaReason(opp, band, profileSkills, now.getTime()),
     match_score: opp.score,
   };
@@ -165,20 +165,18 @@ export interface DashboardPayload {
  * actions_required = global open tasks due ≤ today + scoped opps due ≤ today.
  * agents are always global (the registry is not eye-scoped).
  */
-export function dashboard(ctx: AppContext, now: Date = new Date(), eye: Eye = 'all'): DashboardPayload {
+export async function dashboard(ctx: AppContext, now: Date = new Date(), eye: Eye = 'all'): Promise<DashboardPayload> {
   const { nodes } = ctx;
   const todayEnd = endOfTodayIso(now);
   const since24h = new Date(now.getTime() - DAY_MS).toISOString();
 
   // actions_required: open TASKs due ≤ today (global) + eye-scoped opps with next_action.due ≤ today.
-  const openTasksDue = nodes
-    .list({ type: 'TASK', limit: 200, due_before: todayEnd })
+  const openTasksDue = (await nodes.list({ type: 'TASK', limit: 200, due_before: todayEnd }))
     .items.filter((t) => t.status === 'TODO' || t.status === 'IN_PROGRESS').length;
 
   const careerVisible = eye === 'career' || eye === 'all' || eye === 'control';
   const oppTypes = opportunityTypesForEye(eye);
-  const opps = nodes
-    .list({ type: 'OPPORTUNITY', opportunity_types: oppTypes, limit: 200 })
+  const opps = (await nodes.list({ type: 'OPPORTUNITY', opportunity_types: oppTypes, limit: 200 }))
     .items as Array<Node & { opportunity_type: NonNullable<Node['opportunity_type']> }>;
   const jobOpps = careerVisible ? opps.filter((o) => o.opportunity_type === 'JOB') : [];
 
@@ -193,9 +191,9 @@ export function dashboard(ctx: AppContext, now: Date = new Date(), eye: Eye = 'a
   const pendingApplications = jobOpps.filter((o) => o.status === 'APPLIED' || o.status === 'RECRUITER_RESPONSE').length;
   const recruitersAwaiting = jobOpps.filter((o) => o.status === 'RECRUITER_RESPONSE').length;
 
-  const agents = nodes.list({ type: 'AGENT', sort: 'name', limit: 50 }).items;
+  const agents = (await nodes.list({ type: 'AGENT', sort: 'name', limit: 50 })).items;
 
-  const nba = nextBestAction(ctx, now, eye);
+  const nba = await nextBestAction(ctx, now, eye);
 
   return {
     today: {

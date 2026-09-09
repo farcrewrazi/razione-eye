@@ -1,16 +1,27 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { openDb } from '../src/db.ts';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import type { Pool } from 'pg';
 import { NodesRepo } from '../src/nodes.ts';
+import { openTestDb, resetTestDb, closeTestDb } from './helpers.ts';
 
+let pool: Pool;
 let repo: NodesRepo;
 
-beforeEach(() => {
-  repo = new NodesRepo(openDb({ path: ':memory:' }));
+beforeAll(async () => {
+  pool = await openTestDb();
+});
+
+beforeEach(async () => {
+  await resetTestDb(pool);
+  repo = new NodesRepo(pool);
+});
+
+afterAll(async () => {
+  await closeTestDb(pool);
 });
 
 describe('NodesRepo', () => {
-  it('creates and reads back a node with ULID + timestamps', () => {
-    const n = repo.create({
+  it('creates and reads back a node with ULID + timestamps', async () => {
+    const n = await repo.create({
       type: 'COMPANY',
       name: 'ABC Technology',
       source: 'manual',
@@ -22,48 +33,48 @@ describe('NodesRepo', () => {
     expect(n.updated_at).toBeTruthy();
     expect(n.tags).toEqual(['software-house']);
 
-    const back = repo.getById(n.id);
+    const back = await repo.getById(n.id);
     expect(back?.name).toBe('ABC Technology');
     expect(back?.data['industry']).toBe('Software');
     expect((back?.data['stack'] as string[]).length).toBe(2);
   });
 
   it('updates fields and merges data, bumping updated_at', async () => {
-    const n = repo.create({ type: 'SKILL', name: 'Node.js', data: { name: 'Node.js' } });
+    const n = await repo.create({ type: 'SKILL', name: 'Node.js', data: { name: 'Node.js' } });
     await new Promise((r) => setTimeout(r, 5));
-    const u = repo.update(n.id, { status: 'X', data: { level: 'expert' } });
+    const u = await repo.update(n.id, { status: 'X', data: { level: 'expert' } });
     expect(u?.status).toBe('X');
     expect(u?.data['level']).toBe('expert');
     expect(u?.data['name']).toBe('Node.js'); // merged, not replaced
     expect(u!.updated_at >= n.updated_at).toBe(true);
   });
 
-  it('deletes a node', () => {
-    const n = repo.create({ type: 'SKILL', name: 'SQL', data: { name: 'SQL' } });
-    expect(repo.delete(n.id)).toBe(true);
-    expect(repo.getById(n.id)).toBeNull();
-    expect(repo.delete(n.id)).toBe(false);
+  it('deletes a node', async () => {
+    const n = await repo.create({ type: 'SKILL', name: 'SQL', data: { name: 'SQL' } });
+    expect(await repo.delete(n.id)).toBe(true);
+    expect(await repo.getById(n.id)).toBeNull();
+    expect(await repo.delete(n.id)).toBe(false);
   });
 
-  it('lists with filters + pagination', () => {
-    repo.create({ type: 'TASK', name: 'a', status: 'TODO', due_at: '2026-09-10T00:00:00.000Z', data: { title: 'a' } });
-    repo.create({ type: 'TASK', name: 'b', status: 'DONE', due_at: '2026-09-01T00:00:00.000Z', data: { title: 'b' } });
-    repo.create({ type: 'COMPANY', name: 'c', data: {} });
+  it('lists with filters + pagination', async () => {
+    await repo.create({ type: 'TASK', name: 'a', status: 'TODO', due_at: '2026-09-10T00:00:00.000Z', data: { title: 'a' } });
+    await repo.create({ type: 'TASK', name: 'b', status: 'DONE', due_at: '2026-09-01T00:00:00.000Z', data: { title: 'b' } });
+    await repo.create({ type: 'COMPANY', name: 'c', data: {} });
 
-    expect(repo.list({ type: 'TASK' }).total).toBe(2);
-    expect(repo.list({ type: 'TASK', status: 'TODO' }).total).toBe(1);
-    expect(repo.list({ type: 'TASK', due_before: '2026-09-05T00:00:00.000Z' }).total).toBe(1);
-    expect(repo.list({ type: 'TASK', overdue: true }).total).toBe(1);
-    expect(repo.list({ q: 'ABC' }).total).toBe(0);
+    expect((await repo.list({ type: 'TASK' })).total).toBe(2);
+    expect((await repo.list({ type: 'TASK', status: 'TODO' })).total).toBe(1);
+    expect((await repo.list({ type: 'TASK', due_before: '2026-09-05T00:00:00.000Z' })).total).toBe(1);
+    expect((await repo.list({ type: 'TASK', overdue: true })).total).toBe(1);
+    expect((await repo.list({ q: 'ABC' })).total).toBe(0);
 
-    const page = repo.list({ type: 'TASK', limit: 1, offset: 1, sort: 'due_at' });
+    const page = await repo.list({ type: 'TASK', limit: 1, offset: 1, sort: 'due_at' });
     expect(page.items.length).toBe(1);
     expect(page.total).toBe(2);
   });
 
-  it('findByTypeAndName supports deterministic lookups', () => {
-    repo.create({ type: 'PERSON', name: 'Farcrew Razi', data: { full_name: 'Farcrew Razi' } });
-    expect(repo.findByTypeAndName('PERSON', 'Farcrew Razi')?.type).toBe('PERSON');
-    expect(repo.findByTypeAndName('PERSON', 'nobody')).toBeNull();
+  it('findByTypeAndName supports deterministic lookups', async () => {
+    await repo.create({ type: 'PERSON', name: 'Farcrew Razi', data: { full_name: 'Farcrew Razi' } });
+    expect((await repo.findByTypeAndName('PERSON', 'Farcrew Razi'))?.type).toBe('PERSON');
+    expect(await repo.findByTypeAndName('PERSON', 'nobody')).toBeNull();
   });
 });

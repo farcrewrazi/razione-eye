@@ -4,7 +4,7 @@ import { getCtx, err } from './http-util.ts';
 import { nodeEventsHandler } from './events.ts';
 
 export const tasksRoute = new Hono()
-  .get('/', (c) => {
+  .get('/', async (c) => {
     const { nodes } = getCtx(c);
     const q = c.req.query();
     const status = q['status'];
@@ -12,7 +12,7 @@ export const tasksRoute = new Hono()
       return err(c, 400, 'BAD_QUERY', `invalid status: ${status}`);
     }
     const overdue = q['overdue'];
-    const { items, total } = nodes.list({
+    const { items, total } = await nodes.list({
       type: 'TASK',
       ...(status ? { status } : {}),
       ...(q['due_before'] ? { due_before: q['due_before'] } : {}),
@@ -33,7 +33,7 @@ export const tasksRoute = new Hono()
     }
     const input = parsed.data;
     const taskData = input.data as TaskData;
-    const node = nodes.create({
+    const node = await nodes.create({
       type: 'TASK',
       name: input.name ?? taskData.title,
       status: input.status ?? 'TODO',
@@ -46,14 +46,14 @@ export const tasksRoute = new Hono()
 
     // opportunity_id is ALSO expressed as a `serves` edge (doc 02 §5).
     if (taskData.opportunity_id) {
-      const target = nodes.getById(taskData.opportunity_id);
-      if (target) edges.ensure(node.id, target.id, 'serves');
+      const target = await nodes.getById(taskData.opportunity_id);
+      if (target) await edges.ensure(node.id, target.id, 'serves');
     }
     return c.json(node, 201);
   })
   .patch('/:id', async (c) => {
     const { nodes, edges } = getCtx(c);
-    const node = nodes.getById(c.req.param('id'));
+    const node = await nodes.getById(c.req.param('id'));
     if (!node || node.type !== 'TASK') return err(c, 404, 'NOT_FOUND', 'task not found');
 
     const body: unknown = await c.req.json().catch(() => null);
@@ -63,7 +63,7 @@ export const tasksRoute = new Hono()
     }
     const input = parsed.data;
     const mergedData = input.data ? { ...node.data, ...input.data } : node.data;
-    const updated = nodes.update(node.id, {
+    const updated = await nodes.update(node.id, {
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.due_at !== undefined ? { due_at: input.due_at } : {}),
       ...(input.name !== undefined ? { name: input.name } : {}),
@@ -75,8 +75,8 @@ export const tasksRoute = new Hono()
 
     const oppId = (mergedData as TaskData).opportunity_id;
     if (input.data?.opportunity_id && oppId) {
-      const target = nodes.getById(oppId);
-      if (target) edges.ensure(node.id, target.id, 'serves');
+      const target = await nodes.getById(oppId);
+      if (target) await edges.ensure(node.id, target.id, 'serves');
     }
     return c.json(updated);
   });

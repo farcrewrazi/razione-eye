@@ -1,5 +1,6 @@
--- RaziOne Eye — SQLite property-graph schema (Phase 0, D-008).
--- All timestamps are ISO-8601 UTC strings. All ids are ULIDs.
+-- RaziOne Eye — PostgreSQL 17 property-graph schema (Phase 0, D-008).
+-- All timestamps are TIMESTAMPTZ (UTC). All ids are ULIDs (TEXT PKs).
+-- JSON TEXT columns (tags/notes/data/payload) are JSONB.
 
 CREATE TABLE IF NOT EXISTS nodes (
   id               TEXT PRIMARY KEY,      -- ULID
@@ -8,13 +9,13 @@ CREATE TABLE IF NOT EXISTS nodes (
   status           TEXT,                  -- pipeline stage / task status / signal disposition
   opportunity_type TEXT,                  -- JOB|WEBSITE|CONSULTANCY|AFFILIATE|CRYPTO (OPPORTUNITY only)
   score            INTEGER,               -- 0-100 opportunity score
-  due_at           TEXT,                  -- TASK due date / next_action due (ISO or null)
+  due_at           TIMESTAMPTZ,            -- TASK due date / next_action due (or null)
   source           TEXT,
-  tags             TEXT NOT NULL DEFAULT '[]',  -- JSON string[]
-  notes            TEXT NOT NULL DEFAULT '[]',  -- JSON array of (string | {text, created_at})
-  data             TEXT NOT NULL,          -- JSON blob: type-specific payload per doc 02
-  created_at       TEXT NOT NULL,
-  updated_at       TEXT NOT NULL
+  tags             JSONB NOT NULL DEFAULT '[]'::jsonb,  -- string[]
+  notes            JSONB NOT NULL DEFAULT '[]'::jsonb,  -- array of (string | {text, created_at})
+  data             JSONB NOT NULL DEFAULT '{}'::jsonb,  -- type-specific payload per doc 02
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type);
 CREATE INDEX IF NOT EXISTS idx_nodes_status ON nodes(status);
@@ -22,12 +23,12 @@ CREATE INDEX IF NOT EXISTS idx_nodes_optype ON nodes(opportunity_type);
 CREATE INDEX IF NOT EXISTS idx_nodes_due ON nodes(due_at);
 
 CREATE TABLE IF NOT EXISTS edges (
-  id         TEXT PRIMARY KEY,
+  id         TEXT PRIMARY KEY,            -- ULID
   from_id    TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
   to_id      TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  edge_type  TEXT NOT NULL,   -- open vocabulary; known types validated by zod enum
-  data       TEXT,            -- JSON, e.g. {"score": 91} on matches edges
-  created_at TEXT NOT NULL
+  edge_type  TEXT NOT NULL,               -- open vocabulary, known types validated by zod enum
+  data       JSONB,                       -- e.g. {"score": 91} on matches edges
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_id, edge_type);
 CREATE INDEX IF NOT EXISTS idx_edges_to   ON edges(to_id, edge_type);
@@ -36,17 +37,17 @@ CREATE INDEX IF NOT EXISTS idx_edges_to   ON edges(to_id, edge_type);
 -- agent runs, gate decisions. Feeds the Daily Brief ("what changed") + detail activity logs.
 CREATE TABLE IF NOT EXISTS events (
   id         TEXT PRIMARY KEY,      -- ULID
-  at         TEXT NOT NULL,          -- ISO-8601 UTC
+  at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   type       TEXT NOT NULL,          -- see EVENT_TYPES in packages/shared
   node_id    TEXT REFERENCES nodes(id) ON DELETE CASCADE,  -- nullable (e.g. import_run)
   summary    TEXT NOT NULL,
-  data       TEXT                    -- JSON payload (e.g. full ImportReport on import_run)
+  data       JSONB                   -- payload (e.g. full ImportReport on import_run)
 );
 CREATE INDEX IF NOT EXISTS idx_events_node ON events(node_id, at);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(type, at);
 
 -- Wave 4 (T1.11): Action Gate — pending-approval queue. An agent prepares a draft
--- action; it sits PENDING until Razi approves / edits-then-approves / rejects.
+-- action, it sits PENDING until Razi approves / edits-then-approves / rejects.
 -- Only on approve does the status update execute. Every decision also appends a
 -- `gate_decision` event to the events table (the decision log, feeds LEARN later).
 CREATE TABLE IF NOT EXISTS gate_actions (
@@ -55,10 +56,10 @@ CREATE TABLE IF NOT EXISTS gate_actions (
   status          TEXT NOT NULL DEFAULT 'PENDING',  -- PENDING|APPROVED|REJECTED
   opportunity_id  TEXT REFERENCES nodes(id) ON DELETE SET NULL,
   task_id         TEXT REFERENCES nodes(id) ON DELETE SET NULL,
-  payload         TEXT NOT NULL,          -- JSON draft (e.g. cover_note, resume_version, apply_url)
+  payload         JSONB NOT NULL DEFAULT '{}'::jsonb,  -- draft (e.g. cover_note, resume_version, apply_url)
   summary         TEXT NOT NULL,          -- one-line human description for the review list
-  created_at      TEXT NOT NULL,
-  decided_at      TEXT,                   -- set on approve/reject
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  decided_at      TIMESTAMPTZ,            -- set on approve/reject
   decision        TEXT,                   -- approved|edited_approved|rejected
   decision_reason TEXT                    -- required on reject; optional note otherwise
 );

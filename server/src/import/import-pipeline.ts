@@ -35,7 +35,7 @@ import type {
 
 const KNOWN_COMPANY_NAMES = ['RaziSurf'] as const;
 
-export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportReportData {
+export async function runImport(ctx: AppContext, files: ImportFileInput[]): Promise<ImportReportData> {
   const { nodes, edges, events } = ctx;
   const fileReports: FileReport[] = [];
 
@@ -129,8 +129,7 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
   // ── Cross-batch dedup (T1.2): match survivors against existing JOB OPPORTUNITY
   // nodes on normalized company+role. Matches are skipped (never re-created) and
   // merged into the existing node; reported as duplicates with reason 'existing'.
-  const existingJobOpps = nodes
-    .list({ type: 'OPPORTUNITY', opportunity_type: 'JOB', limit: 200 })
+  const existingJobOpps = (await nodes.list({ type: 'OPPORTUNITY', opportunity_type: 'JOB', limit: 200 }))
     .items.map((opp) => ({ opp, key: existingKeyOf(opp) }))
     .filter((e) => e.key !== null);
   const findExisting = (job: NormalizedJob): Node | null => {
@@ -145,7 +144,7 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
   const MERGEABLE = ['location', 'salary', 'salary_min', 'salary_max', 'url', 'stack', 'contact'] as const;
 
   /** Append a provenance note (evented) + merge any richer fields. Returns the merged field names. */
-  const mergeIntoExisting = (existing: Node, job: NormalizedJob, noteText: string, file?: string): string[] => {
+  const mergeIntoExisting = async (existing: Node, job: NormalizedJob, noteText: string, file?: string): Promise<string[]> => {
     const patch: Record<string, unknown> = {};
     const mergedFields: string[] = [];
     for (const field of MERGEABLE) {
@@ -159,8 +158,8 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
     }
     const fullNote = noteText + (mergedFields.length > 0 ? ` — merged fields: ${mergedFields.join(', ')}` : '');
     const notes = [...existing.notes, { text: fullNote, created_at: nowIso() }];
-    nodes.update(existing.id, { notes, ...(Object.keys(patch).length > 0 ? { data: patch } : {}) });
-    events.record({
+    await nodes.update(existing.id, { notes, ...(Object.keys(patch).length > 0 ? { data: patch } : {}) });
+    await events.record({
       type: 'note_added',
       node_id: existing.id,
       summary: fullNote,
@@ -178,7 +177,7 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
       .find((f) => f.path === file)
       ?.duplicates.push({ kept: existing.name ?? `${job.company} — ${job.role}`, dropped: describe(job), reason: 'existing', file });
 
-    mergeIntoExisting(
+    await mergeIntoExisting(
       existing,
       job,
       `Re-imported duplicate skipped: "${describe(job)}" (from file ${file}, format ${formatOf(files, file)})`,
@@ -193,13 +192,13 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
   let createdEdges = 0;
 
   const companyIdsByKey = new Map<string, string>();
-  const findOrCreateCompany = (name: string): { id: string; created: boolean } => {
+  const findOrCreateCompany = async (name: string): Promise<{ id: string; created: boolean }> => {
     const key = normalizeCompanyName(name);
     const cached = companyIdsByKey.get(key);
     if (cached) return { id: cached, created: false };
 
     // Match against existing companies by normalized-name equality.
-    const { items: existing } = nodes.list({ type: 'COMPANY', limit: 200 });
+    const { items: existing } = await nodes.list({ type: 'COMPANY', limit: 200 });
     for (const company of existing) {
       if (company.name && normalizeCompanyName(company.name) === key) {
         companyIdsByKey.set(key, company.id);
@@ -207,7 +206,7 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
       }
     }
     const displayName = KNOWN_COMPANY_NAMES.find((n) => normalizeCompanyName(n) === key) ?? name.trim();
-    const company = nodes.create({
+    const company = await nodes.create({
       type: 'COMPANY',
       name: displayName,
       source: 'import',
@@ -219,7 +218,7 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
   };
 
   for (const { job, file } of toCreate) {
-    const company = findOrCreateCompany(job.company);
+    const company = await findOrCreateCompany(job.company);
     if (company.created) createdCompanies++;
 
     const notes: Array<{ text: string; created_at: string }> = (job.notes ?? []).map((text) => ({
@@ -238,7 +237,7 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
       });
     }
 
-    const opportunity = nodes.create({
+    const opportunity = await nodes.create({
       type: 'OPPORTUNITY',
       name: `${job.company} — ${job.role}`,
       status: 'DISCOVERED',
@@ -264,8 +263,8 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
     });
     createdOpportunities++;
 
-    edges.belongsTo(opportunity.id, company.id);
-    edges.hiring(company.id, opportunity.id);
+    await edges.belongsTo(opportunity.id, company.id);
+    await edges.hiring(company.id, opportunity.id);
     createdEdges += 2;
 
     // Link cross-file near-duplicates (same company+role, other channels) onto
@@ -273,8 +272,8 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
     // duplicate linkage; no self-edges — edges connect distinct nodes).
     const alternates = linked.filter((l) => keyOf(l.winner.job) === keyOf(job));
     if (alternates.length > 0) {
-      const current = nodes.getById(opportunity.id)!;
-      nodes.update(opportunity.id, {
+      const current = (await nodes.getById(opportunity.id))!;
+      await nodes.update(opportunity.id, {
         notes: [
           ...current.notes,
           ...alternates.map(({ loser, winner }) => ({
@@ -288,7 +287,7 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
       });
     }
 
-    events.record({
+    await events.record({
       type: 'opportunity_imported',
       node_id: opportunity.id,
       summary: `Imported "${job.role}" at ${job.company} from ${file}`,
@@ -299,7 +298,7 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
   // ── Flagged records → SIGNAL nodes (queryable, fixable — never guessed) ──
   for (const report of fileReports) {
     for (const flagged of report.flagged) {
-      const signal = nodes.create({
+      const signal = await nodes.create({
         type: 'SIGNAL',
         name: `Incomplete import record (${flagged.reason})`,
         status: 'NEW',
@@ -314,7 +313,7 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
         },
       });
       flagged.signal_id = signal.id;
-      events.record({
+      await events.record({
         type: 'signal_created',
         node_id: signal.id,
         summary: `Flagged incomplete import record: ${flagged.reason}`,
@@ -336,7 +335,7 @@ export function runImport(ctx: AppContext, files: ImportFileInput[]): ImportRepo
     },
   };
 
-  events.record({
+  await events.record({
     type: 'import_run',
     summary: `Import run: ${report.totals.raw_records} raw → ${createdOpportunities} created, ${report.totals.duplicates} duplicates, ${report.totals.flagged} flagged`,
     data: report as unknown as Record<string, unknown>,

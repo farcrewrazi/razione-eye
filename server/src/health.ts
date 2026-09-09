@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
 import { getCtx } from './http-util.ts';
 
-export const healthRoute = new Hono().get('/', (c) => {
+export const healthRoute = new Hono().get('/', async (c) => {
   const { db } = getCtx(c);
   let dbStatus = 'connected';
   try {
-    db.prepare('SELECT 1').get();
+    await db.query('SELECT 1');
   } catch {
     dbStatus = 'error';
   }

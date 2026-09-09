@@ -1,4 +1,4 @@
-# RaziOne Eye — production stack (separate backend + frontend containers).
+# RaziOne Eye — production stack (separate backend + frontend containers + Postgres).
 #
 # Usage on VPS:
 #   cp .env.example .env   # then set CORS_ORIGIN to your domain
@@ -7,9 +7,33 @@
 # Topology:
 #   browser (https via Nginx + Certbot on host) → frontend 127.0.0.1:8080
 #     → nginx proxies /api/ → backend:8787 (compose network only)
-#   SQLite lives in the `razione-data` named volume (survives rebuilds).
+#   Postgres 17 lives in the `db` service (`pgdata` volume survives rebuilds;
+#   `pgbackups` holds pg_dump snapshots).
 
 services:
+  db:
+    image: postgres:17-alpine
+    container_name: razione-eye-db
+    # Published on loopback for local dev/tests (psql, vitest, migrate-sqlite
+    # via DATABASE_URL=postgres://...@localhost:5432/...). Backend in compose
+    # still uses host `db` (see DATABASE_URL below), never localhost.
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-razione_eye}
+      POSTGRES_USER: ${POSTGRES_USER:-razione}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-razione}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - pgbackups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-razione} -d $${POSTGRES_DB:-razione_eye}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
   backend:
     build:
       context: .
@@ -22,19 +46,22 @@ services:
     environment:
       NODE_ENV: production
       PORT: "8787"
-      RAZIONE_DB_PATH: /app/server/data/razione-eye.db
+      DATABASE_URL: postgres://${POSTGRES_USER:-razione}:${POSTGRES_PASSWORD:-razione}@db:5432/${POSTGRES_DB:-razione_eye}
       CORS_ORIGIN: ${CORS_ORIGIN:-}
+    depends_on:
+      db:
+        condition: service_healthy
     expose:
       - "8787"
     volumes:
-      - razione-data:/app/server/data
+      - pgbackups:/app/server/backups
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8787/api/health').then(r => { if (!r.ok) process.exit(1) })"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 60s
 
   frontend:
     build:
@@ -46,7 +73,7 @@ services:
     container_name: razione-eye-frontend
     depends_on:
       backend:
-        condition: service_started
+        condition: service_healthy
     # Bound to localhost only — public entry is host Nginx (:80/:443) → 8080,
     # with TLS from Certbot (see nginx-vps.example.conf).
     ports:
@@ -54,5 +81,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  razione-data:
-    name: razione-data
+  pgdata:
+    name: razione-eye-pgdata
+  pgbackups:
+    name: razione-eye-pgbackups

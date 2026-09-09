@@ -58,14 +58,14 @@ function emptyBands(): Record<ScoreBand, number> {
  * Find the company node linked to an opportunity: `belongs_to`/`hiring` edges,
  * falling back to a name lookup on data.company.
  */
-function companyFor(ctx: AppContext, opportunity: Node): Node | null {
+async function companyFor(ctx: AppContext, opportunity: Node): Promise<Node | null> {
   const { nodes, edges } = ctx;
-  for (const e of edges.outgoing(opportunity.id, 'belongs_to')) {
-    const n = nodes.getById(e.to_id);
+  for (const e of await edges.outgoing(opportunity.id, 'belongs_to')) {
+    const n = await nodes.getById(e.to_id);
     if (n?.type === 'COMPANY') return n;
   }
-  for (const e of edges.incoming(opportunity.id, 'hiring')) {
-    const n = nodes.getById(e.from_id);
+  for (const e of await edges.incoming(opportunity.id, 'hiring')) {
+    const n = await nodes.getById(e.from_id);
     if (n?.type === 'COMPANY') return n;
   }
   const companyName = opportunity.data['company'];
@@ -80,26 +80,26 @@ function companyFor(ctx: AppContext, opportunity: Node): Node | null {
  * - force=false (default): only opportunities without sub-scores (idempotent).
  * - force=true: re-analyze every JOB opportunity.
  */
-export function runJobAnalyst(
+export async function runJobAnalyst(
   ctx: AppContext,
   agentNode: Node,
   options: { force?: boolean; analyst?: AnalystPort } = {},
-): JobAnalystRunResult {
+): Promise<JobAnalystRunResult> {
   const { nodes, edges, events } = ctx;
   const analyst = options.analyst ?? new DeterministicAnalyst();
   const force = options.force ?? false;
 
-  const profileNode = nodes.findByTypeAndName('PERSON', PROFILE_PERSON_NAME);
+  const profileNode = await nodes.findByTypeAndName('PERSON', PROFILE_PERSON_NAME);
   const profile = (profileNode?.data ?? null) as PersonData | null;
 
-  const { items: jobs } = nodes.list({ type: 'OPPORTUNITY', opportunity_type: 'JOB', limit: 200, sort: 'created_at' });
+  const { items: jobs } = await nodes.list({ type: 'OPPORTUNITY', opportunity_type: 'JOB', limit: 200, sort: 'created_at' });
   const targets = force ? jobs : jobs.filter((j) => j.data['matching'] === undefined);
 
   const analyzedItems: AnalyzedItem[] = [];
   for (const opp of targets) {
-    const result = analyst.analyze({ opportunity: opp, profile, company: companyFor(ctx, opp) });
+    const result = analyst.analyze({ opportunity: opp, profile, company: await companyFor(ctx, opp) });
     const persisted = buildPersistedAnalysis(opp, result);
-    nodes.update(opp.id, {
+    await nodes.update(opp.id, {
       score: persisted.score,
       status: persisted.status,
       data: persisted.dataPatch,
@@ -108,16 +108,17 @@ export function runJobAnalyst(
 
     // matches edge person→opportunity with {score} — update score if the edge exists.
     if (profileNode) {
-      const existing = edges.outgoing(profileNode.id, 'matches').find((e) => e.to_id === opp.id);
+      const outgoing = await edges.outgoing(profileNode.id, 'matches');
+      const existing = outgoing.find((e) => e.to_id === opp.id);
       if (existing) {
-        edges.delete(existing.id);
-        edges.create(profileNode.id, opp.id, 'matches', { score: result.total });
+        await edges.delete(existing.id);
+        await edges.create(profileNode.id, opp.id, 'matches', { score: result.total });
       } else {
-        edges.matches(profileNode.id, opp.id, result.total);
+        await edges.matches(profileNode.id, opp.id, result.total);
       }
     }
 
-    events.record({
+    await events.record({
       type: 'analyzed',
       node_id: opp.id,
       summary: analystSummaryNote(result),
@@ -163,9 +164,9 @@ export function runJobAnalyst(
     { at: now, status, summary, ...({ report } as Record<string, unknown>) },
   ].slice(-RUNS_CAP);
   const patched: AgentData = { ...data, last_run: now, last_status: status, runs };
-  const updatedAgent = nodes.update(agentNode.id, { data: { ...patched } });
+  const updatedAgent = await nodes.update(agentNode.id, { data: { ...patched } });
 
-  events.record({
+  await events.record({
     type: 'agent_run',
     node_id: agentNode.id,
     summary,
@@ -187,9 +188,9 @@ export interface RankingItem {
 }
 
 /** Ranked pipeline — JOB opportunities by score DESC (unscored last). */
-export function pipelineRanking(ctx: AppContext): { items: RankingItem[]; total: number } {
+export async function pipelineRanking(ctx: AppContext): Promise<{ items: RankingItem[]; total: number }> {
   const { nodes } = ctx;
-  const { items } = nodes.list({ type: 'OPPORTUNITY', opportunity_type: 'JOB', limit: 200 });
+  const { items } = await nodes.list({ type: 'OPPORTUNITY', opportunity_type: 'JOB', limit: 200 });
   const projected: RankingItem[] = items.map((opp) => {
     const nextAction = opp.data['next_action'] as { due?: string | null } | undefined;
     return {

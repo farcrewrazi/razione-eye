@@ -7,21 +7,21 @@ import { JOB_ANALYST_NAME, runJobAnalyst } from './agents/run-service.ts';
 const RUNS_CAP = 50;
 
 export const agentsRoute = new Hono()
-  .get('/', (c) => {
+  .get('/', async (c) => {
     const { nodes } = getCtx(c);
-    const { items, total } = nodes.list({ type: 'AGENT', sort: 'name' });
+    const { items, total } = await nodes.list({ type: 'AGENT', sort: 'name' });
     return c.json({ items, total });
   })
-  .get('/:id', (c) => {
+  .get('/:id', async (c) => {
     const { nodes } = getCtx(c);
-    const node = nodes.getById(c.req.param('id'));
+    const node = await nodes.getById(c.req.param('id'));
     if (!node || node.type !== 'AGENT') return err(c, 404, 'NOT_FOUND', 'agent not found');
     return c.json(node);
   })
-  .post('/:id/run', (c) => {
+  .post('/:id/run', async (c) => {
     const ctx = getCtx(c);
     const { nodes, events } = ctx;
-    const node = nodes.getById(c.req.param('id'));
+    const node = await nodes.getById(c.req.param('id'));
     if (!node || node.type !== 'AGENT') return err(c, 404, 'NOT_FOUND', 'agent not found');
 
     const data = agentDataSchema.parse(node.data) as AgentData;
@@ -30,7 +30,7 @@ export const agentsRoute = new Hono()
     // ?force=true re-analyzes everything; default only jobs lacking sub-scores.
     if (data.name === JOB_ANALYST_NAME) {
       const force = c.req.query('force') === 'true';
-      const { agent, report } = runJobAnalyst(ctx, node, { force });
+      const { agent, report } = await runJobAnalyst(ctx, node, { force });
       return c.json({ ...agent, report });
     }
 
@@ -38,8 +38,8 @@ export const agentsRoute = new Hono()
     const now = nowIso();
     const runs = [...data.runs, { at: now, status: 'empty' as const, summary: 'stub run — capability not implemented in Phase 0' }].slice(-RUNS_CAP);
     const patched: AgentData = { ...data, last_run: now, last_status: 'empty', runs };
-    const updated = nodes.update(node.id, { data: { ...patched } });
-    events.record({
+    const updated = await nodes.update(node.id, { data: { ...patched } });
+    await events.record({
       type: 'agent_run',
       node_id: node.id,
       summary: `Agent "${data.name}" run: empty (stub)`,

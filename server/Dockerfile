@@ -1,4 +1,4 @@
-# RaziOne Eye — backend (Hono + node:sqlite)
+# RaziOne Eye — backend (Hono + Postgres via `pg`)
 # Build context: repo root (needs pnpm workspace + packages/shared).
 #   docker build -f server/Dockerfile -t razione-eye-backend .
 FROM node:22-slim AS base
@@ -6,6 +6,10 @@ FROM node:22-slim AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
+
+# postgresql-client provides pg_dump / pg_isready for backups + healthchecks.
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -35,11 +39,11 @@ RUN rm -rf /app/packages/shared/dist /app/packages/shared/tsconfig.tsbuildinfo \
 WORKDIR /app/server
 
 ENV NODE_ENV=production \
-    PORT=8787 \
-    RAZIONE_DB_PATH=/app/server/data/razione-eye.db
+    PORT=8787
 
-# Writable SQLite directory (backed by the `razione-data` volume in compose).
-RUN mkdir -p /app/server/data && chown -R node:node /app
+# Writable backups directory (backed by the `pgbackups` volume in compose;
+# pg_dump snapshots land here / in /backups on the db service).
+RUN mkdir -p /app/server/backups && chown -R node:node /app
 
 USER node
 

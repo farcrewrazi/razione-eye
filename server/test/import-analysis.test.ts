@@ -3,16 +3,27 @@
  * over every imported job, then read the ranked pipeline and assert the whole
  * loop works: DISCOVERED → ANALYZED, scored, banded, ranked.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { Hono } from 'hono';
-import { openDb } from '../src/db.ts';
+import type { Pool } from 'pg';
 import { createApp } from '../src/index.ts';
+import { openTestDb, resetTestDb, closeTestDb } from './helpers.ts';
 import { loadFixtures } from './import/helpers.ts';
 
+let pool: Pool;
 let app: Hono;
 
-beforeEach(() => {
-  ({ app } = createApp(openDb({ path: ':memory:' })));
+beforeAll(async () => {
+  pool = await openTestDb();
+  ({ app } = createApp(pool));
+});
+
+beforeEach(async () => {
+  await resetTestDb(pool);
+});
+
+afterAll(async () => {
+  await closeTestDb(pool);
 });
 
 async function json(res: Response): Promise<Record<string, unknown>> {

@@ -28,16 +28,16 @@ export interface SeedResult {
   agent_ids: string[];
 }
 
-export function runSeed(ctx: AppContext): SeedResult {
+export async function runSeed(ctx: AppContext): Promise<SeedResult> {
   const { nodes, edges } = ctx;
 
-  const nodesBefore = countAllNodes(ctx);
-  const edgesBefore = edges.count();
+  const nodesBefore = await countAllNodes(ctx);
+  const edgesBefore = await edges.count();
 
   // ── T0.8: Razi Profile PERSON ──────────────────────────────────────────
-  let profile = nodes.findByTypeAndName('PERSON', PROFILE_PERSON_NAME);
+  let profile = await nodes.findByTypeAndName('PERSON', PROFILE_PERSON_NAME);
   if (!profile) {
-    profile = nodes.create({
+    profile = await nodes.create({
       type: 'PERSON',
       name: PROFILE_PERSON_NAME,
       source: 'seed',
@@ -60,26 +60,26 @@ export function runSeed(ctx: AppContext): SeedResult {
   }
 
   // ── LOCATION node: Cyberjaya + located_in / lives_near edges ───────────
-  const cyberjaya = ensureNamed(ctx, 'LOCATION', CYBERJAYA_NAME);
-  if (!edges.exists(profile.id, cyberjaya.id, 'located_in')) {
-    edges.locatedIn(profile.id, cyberjaya.id);
+  const cyberjaya = await ensureNamed(ctx, 'LOCATION', CYBERJAYA_NAME);
+  if (!(await edges.exists(profile.id, cyberjaya.id, 'located_in'))) {
+    await edges.locatedIn(profile.id, cyberjaya.id);
   }
-  if (!edges.exists(profile.id, cyberjaya.id, 'lives_near')) {
-    edges.ensure(profile.id, cyberjaya.id, 'lives_near');
+  if (!(await edges.exists(profile.id, cyberjaya.id, 'lives_near'))) {
+    await edges.ensure(profile.id, cyberjaya.id, 'lives_near');
   }
 
   // ── SKILL nodes + knows edges ──────────────────────────────────────────
   for (const skill of RAZI_SKILLS) {
-    const skillNode = ensureNamed(ctx, 'SKILL', skill);
-    if (!edges.exists(profile.id, skillNode.id, 'knows')) {
-      edges.knows(profile.id, skillNode.id);
+    const skillNode = await ensureNamed(ctx, 'SKILL', skill);
+    if (!(await edges.exists(profile.id, skillNode.id, 'knows'))) {
+      await edges.knows(profile.id, skillNode.id);
     }
   }
 
   // ── T0.8b: RaziSurf COMPANY + owns edge ────────────────────────────────
-  let razisurf = nodes.findByTypeAndName('COMPANY', RAZISURF_NAME);
+  let razisurf = await nodes.findByTypeAndName('COMPANY', RAZISURF_NAME);
   if (!razisurf) {
-    razisurf = nodes.create({
+    razisurf = await nodes.create({
       type: 'COMPANY',
       name: RAZISURF_NAME,
       source: 'seed',
@@ -91,16 +91,16 @@ export function runSeed(ctx: AppContext): SeedResult {
       },
     });
   }
-  if (!edges.exists(profile.id, razisurf.id, 'owns')) {
-    edges.owns(profile.id, razisurf.id);
+  if (!(await edges.exists(profile.id, razisurf.id, 'owns'))) {
+    await edges.owns(profile.id, razisurf.id);
   }
 
   // ── T0.10: Six AGENT stubs ─────────────────────────────────────────────
   const agentIds: string[] = [];
   for (const stub of AGENT_STUBS) {
-    let agent = nodes.findByTypeAndName('AGENT', stub.name);
+    let agent = await nodes.findByTypeAndName('AGENT', stub.name);
     if (!agent) {
-      agent = nodes.create({
+      agent = await nodes.create({
         type: 'AGENT',
         name: stub.name,
         source: 'seed',
@@ -118,8 +118,8 @@ export function runSeed(ctx: AppContext): SeedResult {
     agentIds.push(agent.id);
   }
 
-  const nodesAfter = countAllNodes(ctx);
-  const edgesAfter = edges.count();
+  const nodesAfter = await countAllNodes(ctx);
+  const edgesAfter = await edges.count();
 
   return {
     created: { nodes: nodesAfter - nodesBefore, edges: edgesAfter - edgesBefore },
@@ -130,13 +130,13 @@ export function runSeed(ctx: AppContext): SeedResult {
   };
 }
 
-function ensureNamed(ctx: AppContext, type: 'SKILL' | 'LOCATION', name: string): Node {
-  const existing = ctx.nodes.findByTypeAndName(type, name);
+async function ensureNamed(ctx: AppContext, type: 'SKILL' | 'LOCATION', name: string): Promise<Node> {
+  const existing = await ctx.nodes.findByTypeAndName(type, name);
   if (existing) return existing;
   return ctx.nodes.create({ type, name, source: 'seed', data: { name } });
 }
 
-function countAllNodes(ctx: AppContext): number {
-  const row = ctx.db.prepare('SELECT COUNT(*) AS c FROM nodes').get() as { c: number };
-  return row.c;
+async function countAllNodes(ctx: AppContext): Promise<number> {
+  const res = await ctx.db.query('SELECT COUNT(*) AS c FROM nodes');
+  return Number(res.rows[0]?.c ?? 0);
 }

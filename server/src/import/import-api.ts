@@ -11,12 +11,12 @@ export const importRoute = new Hono()
     if (!parsed.success) {
       return err(c, 422, 'VALIDATION', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
-    const report = runImport(ctx, parsed.data.files);
+    const report = await runImport(ctx, parsed.data.files);
     return c.json(report, 201);
   })
-  .get('/report', (c) => {
+  .get('/report', async (c) => {
     const { events } = getCtx(c);
-    const latest = events.latestByType('import_run');
+    const latest = await events.latestByType('import_run');
     if (!latest || !latest.data) return err(c, 404, 'NOT_FOUND', 'no import has run yet');
     const report = importReportSchema.safeParse(latest.data);
     if (!report.success) return err(c, 500, 'INTERNAL', 'stored import report is malformed');

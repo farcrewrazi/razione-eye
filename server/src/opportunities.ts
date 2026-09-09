@@ -37,7 +37,7 @@ function withBand(node: Node): Node & { band: string } {
 }
 
 export const opportunitiesRoute = new Hono()
-  .get('/', (c) => {
+  .get('/', async (c) => {
     const { nodes } = getCtx(c);
     const q = c.req.query();
 
@@ -67,7 +67,7 @@ export const opportunitiesRoute = new Hono()
     const eyeTypes = OPPORTUNITY_TYPES_BY_EYE[eye];
     const useTypesFilter = !oppType && eyeTypes.length > 0 && eye !== 'all' && eye !== 'control';
 
-    const { items, total: _total } = nodes.list({
+    const { items, total: _total } = await nodes.list({
       type: 'OPPORTUNITY',
       ...(oppType ? { opportunity_type: oppType } : useTypesFilter ? { opportunity_types: eyeTypes } : {}),
       ...(q['status'] ? { status: q['status'] } : {}),
@@ -103,7 +103,7 @@ export const opportunitiesRoute = new Hono()
   .get('/:id/events', nodeEventsHandler('OPPORTUNITY'))
   .post('/:id/notes', async (c) => {
     const { nodes, events } = getCtx(c);
-    const node = nodes.getById(c.req.param('id'));
+    const node = await nodes.getById(c.req.param('id'));
     if (!node || node.type !== 'OPPORTUNITY') return err(c, 404, 'NOT_FOUND', 'opportunity not found');
 
     const body: unknown = await c.req.json().catch(() => null);
@@ -112,8 +112,8 @@ export const opportunitiesRoute = new Hono()
       return err(c, 422, 'VALIDATION', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
     const note = { text: parsed.data.text, created_at: nowIso() };
-    const updated = nodes.update(node.id, { notes: [...node.notes, note] });
-    events.record({
+    const updated = await nodes.update(node.id, { notes: [...node.notes, note] });
+    await events.record({
       type: 'note_added',
       node_id: node.id,
       summary: `Note added to "${node.name ?? node.id}"`,
@@ -121,22 +121,24 @@ export const opportunitiesRoute = new Hono()
     });
     return c.json(updated, 201);
   })
-  .get('/:id', (c) => {
+  .get('/:id', async (c) => {
     const { nodes, edges } = getCtx(c);
-    const node = nodes.getById(c.req.param('id'));
+    const node = await nodes.getById(c.req.param('id'));
     if (!node || node.type !== 'OPPORTUNITY') return err(c, 404, 'NOT_FOUND', 'opportunity not found');
 
-    const out = edges.outgoing(node.id);
-    const inc = edges.incoming(node.id);
+    const out = await edges.outgoing(node.id);
+    const inc = await edges.incoming(node.id);
     const allEdges = [...out, ...inc];
-    const neighbors = allEdges
-      .map((e) => nodes.getById(e.from_id === node.id ? e.to_id : e.from_id))
-      .filter((n): n is Node => n !== null);
+    const neighborNodes = await Promise.all(
+      allEdges.map((e) => nodes.getById(e.from_id === node.id ? e.to_id : e.from_id)),
+    );
+    const neighbors = neighborNodes.filter((n): n is Node => n !== null);
 
     return c.json({ ...withBand(node), edges: allEdges, neighbors });
   })
   .post('/', async (c) => {
-    const { nodes, edges, events } = getCtx(c);
+    const ctx = getCtx(c);
+    const { nodes, edges, events } = ctx;
     const body: unknown = await c.req.json().catch(() => null);
     const parsed = createOpportunitySchema.safeParse(body);
     if (!parsed.success) {
@@ -154,7 +156,7 @@ export const opportunitiesRoute = new Hono()
     const score = input.score ?? (typeof input.data['opportunity_score'] === 'number' ? input.data['opportunity_score'] as number : null);
     const companyId = typeof input.data['company_id'] === 'string' ? input.data['company_id'] : null;
 
-    const node = nodes.create({
+    const node = await nodes.create({
       type: 'OPPORTUNITY',
       name: input.name ?? (typeof input.data['role'] === 'string' ? input.data['role'] : null),
       status,
@@ -168,13 +170,13 @@ export const opportunitiesRoute = new Hono()
     });
 
     if (companyId) {
-      const company = nodes.getById(companyId);
+      const company = await nodes.getById(companyId);
       if (company && company.type === 'COMPANY') {
-        edges.belongsTo(node.id, company.id);
+        await edges.belongsTo(node.id, company.id);
       }
     }
 
-    events.record({
+    await events.record({
       type: 'opportunity_created',
       node_id: node.id,
       summary: `Opportunity "${node.name ?? node.id}" created (${status})`,
@@ -183,18 +185,18 @@ export const opportunitiesRoute = new Hono()
 
     // T1.1.6-BE: optional signal link-back — mark the source signal PROMOTED.
     if (input.signal_id) {
-      const signal = nodes.getById(input.signal_id);
+      const signal = await nodes.getById(input.signal_id);
       if (!signal || signal.type !== 'SIGNAL') {
         return err(c, 422, 'VALIDATION', `signal_id ${input.signal_id} does not reference a SIGNAL node`);
       }
-      linkExistingOpportunityToSignal(getCtx(c), signal, node);
+      await linkExistingOpportunityToSignal(ctx, signal, node);
     }
 
     return c.json(withBand(node), 201);
   })
   .patch('/:id', async (c) => {
     const { nodes } = getCtx(c);
-    const node = nodes.getById(c.req.param('id'));
+    const node = await nodes.getById(c.req.param('id'));
     if (!node || node.type !== 'OPPORTUNITY') return err(c, 404, 'NOT_FOUND', 'opportunity not found');
 
     const body: unknown = await c.req.json().catch(() => null);
@@ -213,7 +215,7 @@ export const opportunitiesRoute = new Hono()
     const dataErr = validateOpportunityData(newType, mergedData);
     if (dataErr) return err(c, 422, 'VALIDATION', dataErr);
 
-    const updated = nodes.update(node.id, {
+    const updated = await nodes.update(node.id, {
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.opportunity_type !== undefined ? { opportunity_type: input.opportunity_type } : {}),
@@ -228,7 +230,7 @@ export const opportunitiesRoute = new Hono()
   })
   .patch('/:id/status', async (c) => {
     const { nodes, events } = getCtx(c);
-    const node = nodes.getById(c.req.param('id'));
+    const node = await nodes.getById(c.req.param('id'));
     if (!node || node.type !== 'OPPORTUNITY') return err(c, 404, 'NOT_FOUND', 'opportunity not found');
 
     const body: unknown = await c.req.json().catch(() => null);
@@ -240,8 +242,8 @@ export const opportunitiesRoute = new Hono()
       return err(c, 422, 'INVALID_STATUS', `status ${parsed.data.status} is not valid for opportunity_type ${node.opportunity_type}`);
     }
     const previous = node.status;
-    const updated = nodes.update(node.id, { status: parsed.data.status });
-    events.record({
+    const updated = await nodes.update(node.id, { status: parsed.data.status });
+    await events.record({
       type: 'status_changed',
       node_id: node.id,
       summary: `"${node.name ?? node.id}": ${previous} → ${parsed.data.status}`,

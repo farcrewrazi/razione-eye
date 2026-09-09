@@ -1,11 +1,8 @@
 /**
  * CLI: pnpm --filter @razione-eye/server backup
- * VACUUM INTO a timestamped snapshot under server/data/backups/, keep last 30.
+ * pg_dump custom-format snapshot under /app/server/backups (or server/data/backups locally), keep last 30.
  */
-import { openDb } from './db.ts';
 import { runBackup } from './backup-service.ts';
 
-const db = openDb();
-const result = runBackup(db);
+const result = await runBackup();
 console.log(JSON.stringify(result, null, 2));
-db.close();

@@ -31,9 +31,9 @@ import type { AppContext } from './context.ts';
 import { nowIso } from './ulid.ts';
 
 /** Enrich a gate row with its linked nodes for the review screen. */
-function withLinks(ctx: AppContext, action: GateAction): GateAction {
-  const opportunity = action.opportunity_id ? ctx.nodes.getById(action.opportunity_id) : null;
-  const task = action.task_id ? ctx.nodes.getById(action.task_id) : null;
+async function withLinks(ctx: AppContext, action: GateAction): Promise<GateAction> {
+  const opportunity = action.opportunity_id ? await ctx.nodes.getById(action.opportunity_id) : null;
+  const task = action.task_id ? await ctx.nodes.getById(action.task_id) : null;
   return {
     ...action,
     opportunity: opportunity ?? null,
@@ -50,19 +50,20 @@ function summaryFor(payload: ApplyToJobPayload, opportunity: Node | null): strin
 
 export const gateRoute = new Hono()
   // ── List the approval queue (default: PENDING — the dashboard's "N actions required") ──
-  .get('/actions', (c) => {
+  .get('/actions', async (c) => {
     const ctx = getCtx(c);
     const q = c.req.query();
     const status = q['status'];
     if (status && !gateStatusSchema.safeParse(status).success) {
       return err(c, 400, 'BAD_QUERY', `invalid status: ${status}`);
     }
-    const { items, total } = ctx.gate.list({
+    const { items, total } = await ctx.gate.list({
       ...(status ? { status: status as GateAction['status'] } : {}),
       ...(q['limit'] ? { limit: Number(q['limit']) } : {}),
       ...(q['offset'] ? { offset: Number(q['offset']) } : {}),
     });
-    return c.json({ items: items.map((a) => withLinks(ctx, a)), total });
+    const enriched = await Promise.all(items.map((a) => withLinks(ctx, a)));
+    return c.json({ items: enriched, total });
   })
   // ── Submit a draft action (system prepares → Razi confirms) ──
   .post('/actions', async (c) => {
@@ -83,39 +84,39 @@ export const gateRoute = new Hono()
 
     const opportunityId = payload.opportunity_id ?? input.opportunity_id ?? null;
     if (!opportunityId) return err(c, 422, 'VALIDATION', 'opportunity_id is required (in payload or top-level)');
-    const opportunity = ctx.nodes.getById(opportunityId);
+    const opportunity = await ctx.nodes.getById(opportunityId);
     if (!opportunity || opportunity.type !== 'OPPORTUNITY') {
       return err(c, 422, 'VALIDATION', `opportunity_id ${opportunityId} does not reference an OPPORTUNITY node`);
     }
 
     const taskId = payload.task_id ?? input.task_id ?? null;
     if (taskId) {
-      const task = ctx.nodes.getById(taskId);
+      const task = await ctx.nodes.getById(taskId);
       if (!task || task.type !== 'TASK') {
         return err(c, 422, 'VALIDATION', `task_id ${taskId} does not reference a TASK node`);
       }
     }
 
-    const action = ctx.gate.create({
+    const action = await ctx.gate.create({
       action_type: input.action_type,
       opportunity_id: opportunityId,
       task_id: taskId,
       payload: { ...payload, opportunity_id: opportunityId, ...(taskId ? { task_id: taskId } : {}) },
       summary: summaryFor(payload, opportunity),
     });
-    return c.json(withLinks(ctx, action), 201);
+    return c.json(await withLinks(ctx, action), 201);
   })
   // ── Read one queue entry ──
-  .get('/actions/:id', (c) => {
+  .get('/actions/:id', async (c) => {
     const ctx = getCtx(c);
-    const action = ctx.gate.getById(c.req.param('id'));
+    const action = await ctx.gate.getById(c.req.param('id'));
     if (!action) return err(c, 404, 'NOT_FOUND', 'gate action not found');
-    return c.json(withLinks(ctx, action));
+    return c.json(await withLinks(ctx, action));
   })
   // ── Edit the draft payload (PENDING only) ──
   .patch('/actions/:id', async (c) => {
     const ctx = getCtx(c);
-    const action = ctx.gate.getById(c.req.param('id'));
+    const action = await ctx.gate.getById(c.req.param('id'));
     if (!action) return err(c, 404, 'NOT_FOUND', 'gate action not found');
     if (action.status !== 'PENDING') {
       return err(c, 409, 'ALREADY_DECIDED', `gate action already ${action.status.toLowerCase()} — decisions are final`);
@@ -129,13 +130,13 @@ export const gateRoute = new Hono()
     if (!payloadParsed.success) {
       return err(c, 422, 'VALIDATION', payloadParsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
-    const updated = ctx.gate.updatePayload(action.id, { ...action.payload, ...parsed.data.payload })!;
-    return c.json(withLinks(ctx, updated));
+    const updated = (await ctx.gate.updatePayload(action.id, { ...action.payload, ...parsed.data.payload }))!;
+    return c.json(await withLinks(ctx, updated));
   })
   // ── Approve (optionally edit-then-approve in one call) → EXECUTE ──
   .post('/actions/:id/approve', async (c) => {
     const ctx = getCtx(c);
-    const action = ctx.gate.getById(c.req.param('id'));
+    const action = await ctx.gate.getById(c.req.param('id'));
     if (!action) return err(c, 404, 'NOT_FOUND', 'gate action not found');
     if (action.status !== 'PENDING') {
       return err(c, 409, 'ALREADY_DECIDED', `gate action already ${action.status.toLowerCase()} — decisions are final`);
@@ -154,9 +155,10 @@ export const gateRoute = new Hono()
       return err(c, 422, 'VALIDATION', payloadParsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
     const payload = payloadParsed.data;
-    if (edited) ctx.gate.updatePayload(action.id, { ...action.payload, ...parsed.data.payload });
+    void payload;
+    if (edited) await ctx.gate.updatePayload(action.id, { ...action.payload, ...parsed.data.payload });
 
-    const opportunity = action.opportunity_id ? ctx.nodes.getById(action.opportunity_id) : null;
+    const opportunity = action.opportunity_id ? await ctx.nodes.getById(action.opportunity_id) : null;
     if (!opportunity || opportunity.type !== 'OPPORTUNITY') {
       return err(c, 422, 'VALIDATION', 'linked opportunity no longer exists');
     }
@@ -167,9 +169,9 @@ export const gateRoute = new Hono()
     const role = (opportunity.data['role'] as string | undefined) ?? opportunity.name ?? 'role';
 
     // 1. Ensure the apply TASK exists and is DONE.
-    let task = action.task_id ? ctx.nodes.getById(action.task_id) : null;
+    let task = action.task_id ? await ctx.nodes.getById(action.task_id) : null;
     if (!task) {
-      task = ctx.nodes.create({
+      task = await ctx.nodes.create({
         type: 'TASK',
         name: `Apply to ${role}`,
         status: 'DONE',
@@ -183,12 +185,12 @@ export const gateRoute = new Hono()
           completed_at: now,
         },
       });
-      ctx.edges.ensure(task.id, opportunity.id, 'serves');
+      await ctx.edges.ensure(task.id, opportunity.id, 'serves');
     } else {
-      task = ctx.nodes.update(task.id, {
+      task = (await ctx.nodes.update(task.id, {
         status: 'DONE',
         data: { ...(task.data as Record<string, unknown>), completed_at: now },
-      })!;
+      }))!;
     }
 
     // 2. Opportunity → APPLIED with applied_date (terminals stay untouched).
@@ -196,27 +198,27 @@ export const gateRoute = new Hono()
     const previousStatus = opportunity.status;
     let updatedOpp = opportunity;
     if (!TERMINAL.has(previousStatus ?? '') && previousStatus !== 'APPLIED') {
-      updatedOpp = ctx.nodes.update(opportunity.id, {
+      updatedOpp = (await ctx.nodes.update(opportunity.id, {
         status: 'APPLIED',
         data: {
           ...opportunity.data,
           applied_date: today,
           next_action: { type: 'follow_up', due: isoDaysFromNow(7) },
         },
-      })!;
-      ctx.events.record({
+      }))!;
+      await ctx.events.record({
         type: 'status_changed',
         node_id: opportunity.id,
         summary: `"${opportunity.name ?? opportunity.id}": ${previousStatus} → APPLIED (Action Gate)`,
         data: { from: previousStatus, to: 'APPLIED', gate_action_id: action.id, applied_date: today },
       });
     } else if (previousStatus === 'APPLIED' && opportunity.data['applied_date'] === undefined) {
-      updatedOpp = ctx.nodes.update(opportunity.id, { data: { ...opportunity.data, applied_date: today } })!;
+      updatedOpp = (await ctx.nodes.update(opportunity.id, { data: { ...opportunity.data, applied_date: today } }))!;
     }
 
     // 3. Stamp the decision + log it.
-    const decided = ctx.gate.decide(action.id, edited ? 'edited_approved' : 'approved', { task_id: task.id })!;
-    ctx.events.record({
+    const decided = (await ctx.gate.decide(action.id, edited ? 'edited_approved' : 'approved', { task_id: task.id }))!;
+    await ctx.events.record({
       type: 'gate_decision',
       node_id: opportunity.id,
       summary: `Gate ${decided.decision}: ${action.summary}`,
@@ -230,12 +232,12 @@ export const gateRoute = new Hono()
       },
     });
 
-    return c.json({ ...withLinks(ctx, decided), opportunity: { ...updatedOpp, band: bandForScore(updatedOpp.score) }, task });
+    return c.json({ ...(await withLinks(ctx, decided)), opportunity: { ...updatedOpp, band: bandForScore(updatedOpp.score) }, task });
   })
   // ── Reject (reason required — logged for LEARN) ──
   .post('/actions/:id/reject', async (c) => {
     const ctx = getCtx(c);
-    const action = ctx.gate.getById(c.req.param('id'));
+    const action = await ctx.gate.getById(c.req.param('id'));
     if (!action) return err(c, 404, 'NOT_FOUND', 'gate action not found');
     if (action.status !== 'PENDING') {
       return err(c, 409, 'ALREADY_DECIDED', `gate action already ${action.status.toLowerCase()} — decisions are final`);
@@ -245,8 +247,8 @@ export const gateRoute = new Hono()
     if (!parsed.success) {
       return err(c, 422, 'VALIDATION', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
-    const decided = ctx.gate.decide(action.id, 'rejected', { reason: parsed.data.reason })!;
-    ctx.events.record({
+    const decided = (await ctx.gate.decide(action.id, 'rejected', { reason: parsed.data.reason }))!;
+    await ctx.events.record({
       type: 'gate_decision',
       node_id: action.opportunity_id,
       summary: `Gate rejected: ${action.summary} — ${parsed.data.reason}`,
@@ -258,7 +260,7 @@ export const gateRoute = new Hono()
         opportunity_id: action.opportunity_id,
       },
     });
-    return c.json(withLinks(ctx, decided));
+    return c.json(await withLinks(ctx, decided));
   });
 
 const DAY_MS = 24 * 60 * 60 * 1000;

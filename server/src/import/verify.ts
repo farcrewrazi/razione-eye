@@ -3,7 +3,7 @@
  * `pnpm --filter @razione-eye/server verify:import`).
  *
  * Imports the ~30-job mixed-format corpus (server/fixtures/ by default) into
- * a throwaway in-memory DB and asserts the T1.2 contract:
+ * the configured Postgres DB and asserts the T1.2 contract:
  *   1. Reconciliation: raw_records == created opportunities + duplicates + flagged.
  *   2. Expected corpus shape (jobs per format, deliberate duplicates, flagged
  *      stragglers) — update EXPECT below if the corpus changes deliberately.
@@ -15,7 +15,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openDb } from '../db.ts';
+import { closeDb, initDb } from '../db.ts';
 import { makeContext } from '../context.ts';
 import { runImport } from './import-pipeline.ts';
 import type { ImportFileInput } from './types.ts';
@@ -48,7 +48,7 @@ function check(label: string, actual: unknown, expected: unknown): void {
   console.log(`  ${ok ? '✓' : '✗'} ${label}: ${JSON.stringify(actual)}${ok ? '' : ` (expected ${JSON.stringify(expected)})`}`);
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const dir = resolve(process.argv[2] ?? DEFAULT_DIR);
   const files: ImportFileInput[] = readdirSync(dir)
     .sort()
@@ -63,57 +63,61 @@ function main(): void {
     process.exit(2);
   }
 
-  const db = openDb({ path: ':memory:' });
-  const ctx = makeContext(db);
-  const report = runImport(ctx, files);
+  const db = await initDb();
+  try {
+    const ctx = makeContext(db);
+    const report = await runImport(ctx, files);
 
-  console.log(`\nT1.2 verification — import corpus from ${dir}\n`);
-  for (const f of report.files) {
-    console.log(
-      `  ${f.path} [${f.format}]  raw=${f.raw_records} normalized=${f.normalized} flagged=${f.flagged.length} duplicates=${f.duplicates.length}`,
+    console.log(`\nT1.2 verification — import corpus from ${dir}\n`);
+    for (const f of report.files) {
+      console.log(
+        `  ${f.path} [${f.format}]  raw=${f.raw_records} normalized=${f.normalized} flagged=${f.flagged.length} duplicates=${f.duplicates.length}`,
+      );
+    }
+    console.log('');
+
+    check('files', report.files.length, EXPECT.files);
+    check('raw records', report.totals.raw_records, EXPECT.raw_records);
+    check('created opportunities', report.created.opportunities, EXPECT.created_opportunities);
+    check('flagged stragglers', report.totals.flagged, EXPECT.flagged);
+    check('duplicates', report.totals.duplicates, EXPECT.duplicates);
+    const reasons = report.files.flatMap((f) => f.duplicates.map((d) => d.reason ?? 'batch'));
+    check(
+      'cross-channel linked',
+      reasons.filter((r) => r === 'linked').length,
+      EXPECT.linked,
     );
+    check(
+      'in-batch duplicates',
+      reasons.filter((r) => r === 'batch').length,
+      EXPECT.batch,
+    );
+
+    // Reconciliation invariant (T1.2: imported = raw ± stragglers flagged).
+    const accounted = report.created.opportunities + report.totals.duplicates + report.totals.flagged;
+    check('reconciliation (created + duplicates + flagged == raw)', accounted, report.totals.raw_records);
+    check('opportunities in graph', await ctx.nodes.countByType('OPPORTUNITY'), EXPECT.created_opportunities);
+    check('flagged stored as SIGNALs', await ctx.nodes.countByType('SIGNAL'), EXPECT.flagged);
+
+    // Idempotent re-import: nothing new created; every record accounted for.
+    const second = await runImport(ctx, files);
+    console.log('\nRe-import (idempotency):');
+    check('second run created', second.created.opportunities, 0);
+    const accounted2 = second.created.opportunities + second.totals.duplicates + second.totals.flagged;
+    check('second run reconciliation', accounted2, second.totals.raw_records);
+    check('opportunities still', await ctx.nodes.countByType('OPPORTUNITY'), EXPECT.created_opportunities);
+
+    if (failures > 0) {
+      console.error(`\nT1.2 verification FAILED: ${failures} assertion(s) did not hold.`);
+      process.exit(1);
+    }
+    console.log(
+      `\nT1.2 verification OK: ${report.totals.raw_records} raw → ${report.created.opportunities} imported, ` +
+        `${report.totals.duplicates} duplicates linked/merged, ${report.totals.flagged} stragglers flagged.`,
+    );
+  } finally {
+    await closeDb(db);
   }
-  console.log('');
-
-  check('files', report.files.length, EXPECT.files);
-  check('raw records', report.totals.raw_records, EXPECT.raw_records);
-  check('created opportunities', report.created.opportunities, EXPECT.created_opportunities);
-  check('flagged stragglers', report.totals.flagged, EXPECT.flagged);
-  check('duplicates', report.totals.duplicates, EXPECT.duplicates);
-  const reasons = report.files.flatMap((f) => f.duplicates.map((d) => d.reason ?? 'batch'));
-  check(
-    'cross-channel linked',
-    reasons.filter((r) => r === 'linked').length,
-    EXPECT.linked,
-  );
-  check(
-    'in-batch duplicates',
-    reasons.filter((r) => r === 'batch').length,
-    EXPECT.batch,
-  );
-
-  // Reconciliation invariant (T1.2: imported = raw ± stragglers flagged).
-  const accounted = report.created.opportunities + report.totals.duplicates + report.totals.flagged;
-  check('reconciliation (created + duplicates + flagged == raw)', accounted, report.totals.raw_records);
-  check('opportunities in graph', ctx.nodes.countByType('OPPORTUNITY'), EXPECT.created_opportunities);
-  check('flagged stored as SIGNALs', ctx.nodes.countByType('SIGNAL'), EXPECT.flagged);
-
-  // Idempotent re-import: nothing new created; every record accounted for.
-  const second = runImport(ctx, files);
-  console.log('\nRe-import (idempotency):');
-  check('second run created', second.created.opportunities, 0);
-  const accounted2 = second.created.opportunities + second.totals.duplicates + second.totals.flagged;
-  check('second run reconciliation', accounted2, second.totals.raw_records);
-  check('opportunities still', ctx.nodes.countByType('OPPORTUNITY'), EXPECT.created_opportunities);
-
-  if (failures > 0) {
-    console.error(`\nT1.2 verification FAILED: ${failures} assertion(s) did not hold.`);
-    process.exit(1);
-  }
-  console.log(
-    `\nT1.2 verification OK: ${report.totals.raw_records} raw → ${report.created.opportunities} imported, ` +
-      `${report.totals.duplicates} duplicates linked/merged, ${report.totals.flagged} stragglers flagged.`,
-  );
 }
 
-main();
+await main();

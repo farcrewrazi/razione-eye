@@ -1,13 +1,24 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { openDb } from '../src/db.ts';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import type { Pool } from 'pg';
 import { createApp } from '../src/index.ts';
+import { openTestDb, resetTestDb, closeTestDb } from './helpers.ts';
 import type { Hono } from 'hono';
 
+let pool: Pool;
 let app: Hono;
 
+beforeAll(async () => {
+  pool = await openTestDb();
+  ({ app } = createApp(pool));
+});
+
 beforeEach(async () => {
-  ({ app } = createApp(openDb({ path: ':memory:' })));
+  await resetTestDb(pool);
   await app.request('/api/seed', { method: 'POST' });
+});
+
+afterAll(async () => {
+  await closeTestDb(pool);
 });
 
 async function json(res: Response): Promise<Record<string, unknown>> {

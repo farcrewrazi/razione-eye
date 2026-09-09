@@ -27,13 +27,17 @@ export interface PromoteResult {
 }
 
 /** Create a JOB OPPORTUNITY from a signal and mark the signal PROMOTED. */
-export function promoteSignal(ctx: AppContext, signal: Node, overrides: PromoteOverrides = {}): PromoteResult {
+export async function promoteSignal(
+  ctx: AppContext,
+  signal: Node,
+  overrides: PromoteOverrides = {},
+): Promise<PromoteResult> {
   const { nodes, events } = ctx;
   const sigData = signal.data as SignalData;
   const now = nowIso();
 
   const contentExcerpt = sigData.content.length > 200 ? `${sigData.content.slice(0, 200)}…` : sigData.content;
-  const opportunity = nodes.create({
+  const opportunity = await nodes.create({
     type: 'OPPORTUNITY',
     name: overrides.role ?? signal.name ?? null,
     status: 'DISCOVERED',
@@ -51,19 +55,19 @@ export function promoteSignal(ctx: AppContext, signal: Node, overrides: PromoteO
     },
   });
 
-  events.record({
+  await events.record({
     type: 'opportunity_created',
     node_id: opportunity.id,
     summary: `Opportunity "${opportunity.name ?? opportunity.id}" created from signal (${signal.id})`,
     data: { status: 'DISCOVERED', opportunity_type: 'JOB', source: opportunity.source, signal_id: signal.id },
   });
 
-  const updatedSignal = nodes.update(signal.id, {
+  const updatedSignal = await nodes.update(signal.id, {
     status: 'PROMOTED',
     data: { promoted_to: opportunity.id },
   });
 
-  events.record({
+  await events.record({
     type: 'signal_promoted',
     node_id: signal.id,
     summary: `Signal promoted → opportunity ${opportunity.id}`,
@@ -78,13 +82,17 @@ export function promoteSignal(ctx: AppContext, signal: Node, overrides: PromoteO
  * mark that signal PROMOTED with promoted_to = the new opportunity (no new
  * opportunity is created here). No-op when the signal is missing/foreign.
  */
-export function linkExistingOpportunityToSignal(ctx: AppContext, signal: Node, opportunity: Node): Node {
+export async function linkExistingOpportunityToSignal(
+  ctx: AppContext,
+  signal: Node,
+  opportunity: Node,
+): Promise<Node> {
   const { nodes, events } = ctx;
-  const updatedSignal = nodes.update(signal.id, {
+  const updatedSignal = await nodes.update(signal.id, {
     status: 'PROMOTED',
     data: { promoted_to: opportunity.id },
   });
-  events.record({
+  await events.record({
     type: 'signal_promoted',
     node_id: signal.id,
     summary: `Signal promoted → opportunity ${opportunity.id} (manual entry link-back)`,

@@ -6,9 +6,9 @@ import { getCtx, err } from './http-util.ts';
  * BFS neighborhood expansion up to `depth` hops (default 1, max 3).
  * Returns the root node + all edges traversed + resolved neighbor nodes.
  */
-export const graphRoute = new Hono().get('/neighbors/:id', (c) => {
+export const graphRoute = new Hono().get('/neighbors/:id', async (c) => {
   const { nodes, edges } = getCtx(c);
-  const root = nodes.getById(c.req.param('id'));
+  const root = await nodes.getById(c.req.param('id'));
   if (!root) return err(c, 404, 'NOT_FOUND', 'node not found');
 
   const depthParam = c.req.query('depth');
@@ -21,11 +21,13 @@ export const graphRoute = new Hono().get('/neighbors/:id', (c) => {
   for (let d = 0; d < depth; d++) {
     const next: string[] = [];
     for (const id of frontier) {
-      for (const e of [...edges.outgoing(id), ...edges.incoming(id)]) {
+      const outgoing = await edges.outgoing(id);
+      const incoming = await edges.incoming(id);
+      for (const e of [...outgoing, ...incoming]) {
         seenEdges.set(e.id, e);
         const otherId = e.from_id === id ? e.to_id : e.from_id;
         if (!seenNodes.has(otherId)) {
-          const n = nodes.getById(otherId);
+          const n = await nodes.getById(otherId);
           if (n) {
             seenNodes.set(otherId, n);
             next.push(otherId);

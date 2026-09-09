@@ -65,10 +65,10 @@ function parseDue(due: string | null | undefined): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
-function jobOpps(ctx: AppContext, eye: Eye = 'all'): Node[] {
-  return ctx.nodes
-    .list({ type: 'OPPORTUNITY', opportunity_types: opportunityTypesForEye(eye), limit: 200 })
-    .items;
+async function jobOpps(ctx: AppContext, eye: Eye = 'all'): Promise<Node[]> {
+  return (
+    await ctx.nodes.list({ type: 'OPPORTUNITY', opportunity_types: opportunityTypesForEye(eye), limit: 200 })
+  ).items;
 }
 
 /**
@@ -76,25 +76,24 @@ function jobOpps(ctx: AppContext, eye: Eye = 'all'): Node[] {
  * eye's opportunity slice; tasks / gate / overdue parts stay global.
  * No eye (default 'all') = today's behavior (JOB-first priorities).
  */
-export function morningBrief(ctx: AppContext, now: Date = new Date(), eye: Eye = 'all'): MorningBrief {
+export async function morningBrief(ctx: AppContext, now: Date = new Date(), eye: Eye = 'all'): Promise<MorningBrief> {
   const { nodes, gate } = ctx;
   const todayEnd = endOfTodayIso(now);
   const since24h = new Date(now.getTime() - DAY_MS).toISOString();
 
-  const openTasks = nodes
-    .list({ type: 'TASK', limit: 200 })
+  const openTasks = (await nodes.list({ type: 'TASK', limit: 200 }))
     .items.filter((t) => t.status === 'TODO' || t.status === 'IN_PROGRESS');
   const overdueTasks = openTasks.filter((t) => t.due_at !== null && t.due_at < startOfTodayIso(now)).length;
 
-  const opps = jobOpps(ctx, eye);
+  const opps = await jobOpps(ctx, eye);
   const oppsDue = opps.filter((o) => {
     const t = parseDue((o.data['next_action'] as { due?: string | null } | undefined)?.due);
     return t !== null && t <= Date.parse(todayEnd);
   });
-  const gatePending = gate.pendingCount();
+  const gatePending = await gate.pendingCount();
 
   // Top 3–5 priorities: actionable eye-scoped opps ranked by score, then soonest due.
-  const priorities = opps
+  const ranked = opps
     .filter(
       (o) =>
         o.status !== null &&
@@ -110,21 +109,23 @@ export function morningBrief(ctx: AppContext, now: Date = new Date(), eye: Eye =
       const bd = parseDue((b.o.data['next_action'] as { due?: string | null } | undefined)?.due) ?? Number.MAX_SAFE_INTEGER;
       return ad - bd;
     })
-    .slice(0, 5)
-    .map(({ o, band }): BriefPriority => {
-      const company = linkedCompany(ctx, o);
-      const na = o.data['next_action'] as { type: string; due: string | null } | undefined;
-      return {
-        opportunity_id: o.id,
-        role: (o.data['role'] as string | undefined) ?? o.name,
-        company: company?.name ?? ((o.data['company'] as string | undefined) ?? null),
-        score: o.score,
-        band,
-        next_action: na ?? null,
-      };
-    });
+    .slice(0, 5);
 
-  const nba = nextBestAction(ctx, now, eye);
+  const priorities: BriefPriority[] = [];
+  for (const { o, band } of ranked) {
+    const company = await linkedCompany(ctx, o);
+    const na = o.data['next_action'] as { type: string; due: string | null } | undefined;
+    priorities.push({
+      opportunity_id: o.id,
+      role: (o.data['role'] as string | undefined) ?? o.name,
+      company: company?.name ?? ((o.data['company'] as string | undefined) ?? null),
+      score: o.score,
+      band,
+      next_action: na ?? null,
+    });
+  }
+
+  const nba = await nextBestAction(ctx, now, eye);
 
   // Career counters reflect JOB activity when the eye shows career
   // (career/all/control); other eyes see structurally-zero career blocks.
@@ -161,11 +162,11 @@ export function morningBrief(ctx: AppContext, now: Date = new Date(), eye: Eye =
  * the "opportunities awaiting action" count and the observation chain use the
  * eye's opportunity slice.
  */
-export function eveningBrief(ctx: AppContext, now: Date = new Date(), eye: Eye = 'all'): EveningBrief {
+export async function eveningBrief(ctx: AppContext, now: Date = new Date(), eye: Eye = 'all'): Promise<EveningBrief> {
   const { nodes, events } = ctx;
   const dayStart = startOfTodayIso(now);
 
-  const { items: todaysEvents } = events.list();
+  const { items: todaysEvents } = await events.list();
   const today = todaysEvents.filter((e) => e.at >= dayStart);
 
   const statusCompletedToday = today.filter(
@@ -178,9 +179,8 @@ export function eveningBrief(ctx: AppContext, now: Date = new Date(), eye: Eye =
   // Gate-approved apply actions complete a task too — count them alongside plain task completions.
   const completedToday = statusCompletedToday + gateApprovedToday;
 
-  const opps = jobOpps(ctx, eye);
-  const openTasks = nodes
-    .list({ type: 'TASK', limit: 200 })
+  const opps = await jobOpps(ctx, eye);
+  const openTasks = (await nodes.list({ type: 'TASK', limit: 200 }))
     .items.filter((t) => t.status === 'TODO' || t.status === 'IN_PROGRESS').length;
   const oppsAwaiting = opps.filter(
     (o) =>
@@ -192,7 +192,7 @@ export function eveningBrief(ctx: AppContext, now: Date = new Date(), eye: Eye =
   const newOpps = today.filter((e) => e.type === 'opportunity_created' || e.type === 'opportunity_imported').length;
   const newSignals = today.filter((e) => e.type === 'signal_created').length;
 
-  const { observation, recommendation } = observe(ctx, {
+  const { observation, recommendation } = await observe(ctx, {
     now,
     newOpps,
     completedToday,
@@ -216,12 +216,12 @@ export function eveningBrief(ctx: AppContext, now: Date = new Date(), eye: Eye =
  * The ONE evening observation (doc 03 §5). Deterministic rule chain — first
  * matching rule wins, so the observation is always stable and explainable.
  */
-function observe(
+async function observe(
   ctx: AppContext,
   s: { now: Date; newOpps: number; completedToday: number; gateDecisionsToday: number; oppsAwaiting: number },
   eye: Eye = 'all',
-): { observation: string; recommendation: string } {
-  const opps = jobOpps(ctx, eye);
+): Promise<{ observation: string; recommendation: string }> {
+  const opps = await jobOpps(ctx, eye);
   const discovered = opps.filter((o) => o.status === 'DISCOVERED' || o.status === 'ANALYZED').length;
   const applied = opps.filter((o) => o.status === 'APPLIED').length;
   const awaitingReply = opps.filter((o) => o.status === 'RECRUITER_RESPONSE').length;

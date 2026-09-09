@@ -8,7 +8,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openDb } from '../db.ts';
+import { closeDb, initDb } from '../db.ts';
 import { makeContext } from '../context.ts';
 import { runImport } from './import-pipeline.ts';
 import type { ImportFileInput } from './types.ts';
@@ -23,7 +23,7 @@ const FORMAT_BY_EXT: Record<string, ImportFileInput['format']> = {
   '.txt': 'chat',
 };
 
-function main(): void {
+async function main(): Promise<void> {
   const dir = resolve(process.argv[2] ?? DEFAULT_DIR);
   let entries: string[];
   try {
@@ -48,39 +48,43 @@ function main(): void {
     process.exit(2);
   }
 
-  const db = openDb();
-  const ctx = makeContext(db);
-  const report = runImport(ctx, files);
+  const db = await initDb();
+  try {
+    const ctx = makeContext(db);
+    const report = await runImport(ctx, files);
 
-  // ── Summary ──────────────────────────────────────────────────────────────
-  console.log(`\nRaziOne Eye — import run at ${report.ran_at}`);
-  console.log(`Directory: ${dir}\n`);
-  for (const f of report.files) {
-    console.log(
-      `  ${f.path} [${f.format}]  raw=${f.raw_records} normalized=${f.normalized} flagged=${f.flagged.length} duplicates=${f.duplicates.length}`,
-    );
-    for (const fl of f.flagged) console.log(`    ⚑ flagged: ${fl.reason} → signal ${fl.signal_id ?? '?'}`);
-    for (const d of f.duplicates) {
-      const tag = d.reason === 'existing' ? 'existing' : d.reason === 'linked' ? 'linked (cross-channel)' : 'batch';
-      console.log(`    ⧉ duplicate: kept "${d.kept}", dropped "${d.dropped}" [${tag}]`);
+    // ── Summary ──────────────────────────────────────────────────────────────
+    console.log(`\nRaziOne Eye — import run at ${report.ran_at}`);
+    console.log(`Directory: ${dir}\n`);
+    for (const f of report.files) {
+      console.log(
+        `  ${f.path} [${f.format}]  raw=${f.raw_records} normalized=${f.normalized} flagged=${f.flagged.length} duplicates=${f.duplicates.length}`,
+      );
+      for (const fl of f.flagged) console.log(`    ⚑ flagged: ${fl.reason} → signal ${fl.signal_id ?? '?'}`);
+      for (const d of f.duplicates) {
+        const tag = d.reason === 'existing' ? 'existing' : d.reason === 'linked' ? 'linked (cross-channel)' : 'batch';
+        console.log(`    ⧉ duplicate: kept "${d.kept}", dropped "${d.dropped}" [${tag}]`);
+      }
     }
-  }
-  console.log(
-    `\nCreated: ${report.created.opportunities} opportunities, ${report.created.companies} companies, ${report.created.edges} edges`,
-  );
-  console.log(
-    `Totals: raw=${report.totals.raw_records} normalized=${report.totals.normalized} flagged=${report.totals.flagged} duplicates=${report.totals.duplicates}`,
-  );
-
-  // ── Reconciliation gate ──────────────────────────────────────────────────
-  const accounted = report.created.opportunities + report.totals.duplicates + report.totals.flagged;
-  if (accounted !== report.totals.raw_records) {
-    console.error(
-      `\nRECONCILIATION FAILED: created(${report.created.opportunities}) + duplicates(${report.totals.duplicates}) + flagged(${report.totals.flagged}) = ${accounted} != raw_records(${report.totals.raw_records})`,
+    console.log(
+      `\nCreated: ${report.created.opportunities} opportunities, ${report.created.companies} companies, ${report.created.edges} edges`,
     );
-    process.exit(1);
+    console.log(
+      `Totals: raw=${report.totals.raw_records} normalized=${report.totals.normalized} flagged=${report.totals.flagged} duplicates=${report.totals.duplicates}`,
+    );
+
+    // ── Reconciliation gate ──────────────────────────────────────────────────
+    const accounted = report.created.opportunities + report.totals.duplicates + report.totals.flagged;
+    if (accounted !== report.totals.raw_records) {
+      console.error(
+        `\nRECONCILIATION FAILED: created(${report.created.opportunities}) + duplicates(${report.totals.duplicates}) + flagged(${report.totals.flagged}) = ${accounted} != raw_records(${report.totals.raw_records})`,
+      );
+      process.exit(1);
+    }
+    console.log(`\nReconciliation OK: ${accounted} of ${report.totals.raw_records} raw records accounted for.`);
+  } finally {
+    await closeDb(db);
   }
-  console.log(`\nReconciliation OK: ${accounted} of ${report.totals.raw_records} raw records accounted for.`);
 }
 
-main();
+await main();

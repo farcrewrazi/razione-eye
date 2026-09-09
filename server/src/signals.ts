@@ -32,7 +32,7 @@ const promoteSignalSchema = z
   .strict();
 
 export const signalsRoute = new Hono()
-  .get('/', (c) => {
+  .get('/', async (c) => {
     const { nodes } = getCtx(c);
     const q = c.req.query();
     const disposition = q['disposition'];
@@ -52,7 +52,7 @@ export const signalsRoute = new Hono()
     const allowed = signalType ? [signalType] : SIGNAL_TYPES_BY_EYE[eyeParsed.eye];
     const restricts = allowed.length < SIGNAL_TYPES.length;
 
-    const { items, total } = nodes.list({
+    const { items, total } = await nodes.list({
       type: 'SIGNAL',
       ...(disposition ? { status: disposition } : {}),
       ...(q['q'] ? { q: q['q'] } : {}),
@@ -75,7 +75,7 @@ export const signalsRoute = new Hono()
       return err(c, 422, 'VALIDATION', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
     const input = parsed.data;
-    const node = nodes.create({
+    const node = await nodes.create({
       type: 'SIGNAL',
       name: input.name ?? null,
       status: input.status ?? 'NEW',
@@ -84,7 +84,7 @@ export const signalsRoute = new Hono()
       notes: input.notes ?? [],
       data: input.data as unknown as Record<string, unknown>,
     });
-    events.record({
+    await events.record({
       type: 'signal_created',
       node_id: node.id,
       summary: `Signal created (${input.data.signal_type}, ${node.source})`,
@@ -93,15 +93,15 @@ export const signalsRoute = new Hono()
     return c.json(node, 201);
   })
   .get('/:id/events', nodeEventsHandler('SIGNAL'))
-  .get('/:id', (c) => {
+  .get('/:id', async (c) => {
     const { nodes } = getCtx(c);
-    const node = nodes.getById(c.req.param('id'));
+    const node = await nodes.getById(c.req.param('id'));
     if (!node || node.type !== 'SIGNAL') return err(c, 404, 'NOT_FOUND', 'signal not found');
     return c.json(node);
   })
   .patch('/:id', async (c) => {
     const { nodes, events } = getCtx(c);
-    const node = nodes.getById(c.req.param('id'));
+    const node = await nodes.getById(c.req.param('id'));
     if (!node || node.type !== 'SIGNAL') return err(c, 404, 'NOT_FOUND', 'signal not found');
 
     const body: unknown = await c.req.json().catch(() => null);
@@ -111,7 +111,7 @@ export const signalsRoute = new Hono()
     }
     const input = parsed.data;
     const mergedData = input.data ? { ...node.data, ...input.data } : node.data;
-    const updated = nodes.update(node.id, {
+    const updated = await nodes.update(node.id, {
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.tags !== undefined ? { tags: input.tags } : {}),
@@ -122,7 +122,7 @@ export const signalsRoute = new Hono()
     if (input.status && input.status !== node.status) {
       const eventType =
         input.status === 'PROMOTED' ? 'signal_promoted' : input.status === 'DISMISSED' ? 'signal_dismissed' : 'status_changed';
-      events.record({
+      await events.record({
         type: eventType,
         node_id: node.id,
         summary: `Signal ${node.status} → ${input.status}`,
@@ -134,7 +134,7 @@ export const signalsRoute = new Hono()
   .post('/:id/promote', async (c) => {
     // T1.12-BE — promote a signal into a JOB OPPORTUNITY (idempotent).
     const ctx = getCtx(c);
-    const node = ctx.nodes.getById(c.req.param('id'));
+    const node = await ctx.nodes.getById(c.req.param('id'));
     if (!node || node.type !== 'SIGNAL') return err(c, 404, 'NOT_FOUND', 'signal not found');
 
     const raw: unknown = await c.req.json().catch(() => ({}));
@@ -145,12 +145,12 @@ export const signalsRoute = new Hono()
 
     // Idempotent: already promoted → return the signal + its opportunity.
     if (node.status === 'PROMOTED' && typeof (node.data as SignalData).promoted_to === 'string') {
-      const existing = ctx.nodes.getById((node.data as SignalData).promoted_to!);
+      const existing = await ctx.nodes.getById((node.data as SignalData).promoted_to!);
       if (existing) {
         return c.json({ signal: node, opportunity: { ...existing, band: bandForScore(existing.score) } });
       }
     }
 
-    const { signal, opportunity } = promoteSignal(ctx, node, parsed.data.data ?? {});
+    const { signal, opportunity } = await promoteSignal(ctx, node, parsed.data.data ?? {});
     return c.json({ signal, opportunity: { ...opportunity, band: bandForScore(opportunity.score) } }, 201);
   });

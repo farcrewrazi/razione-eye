@@ -1,12 +1,24 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { openDb } from '../src/db.ts';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import type { Pool } from 'pg';
 import { createApp } from '../src/index.ts';
+import { openTestDb, resetTestDb, closeTestDb, pgDumpAvailable } from './helpers.ts';
+import { unlinkSync } from 'node:fs';
 import type { Hono } from 'hono';
 
+let pool: Pool;
 let app: Hono;
 
-beforeEach(() => {
-  ({ app } = createApp(openDb({ path: ':memory:' })));
+beforeAll(async () => {
+  pool = await openTestDb();
+  ({ app } = createApp(pool));
+});
+
+beforeEach(async () => {
+  await resetTestDb(pool);
+});
+
+afterAll(async () => {
+  await closeTestDb(pool);
 });
 
 async function json(res: Response): Promise<Record<string, unknown>> {
@@ -222,10 +234,20 @@ describe('API smoke', () => {
   });
 
   it('POST /api/backup returns a snapshot path', async () => {
+    if (!(await pgDumpAvailable())) {
+      console.warn('SKIP: pg_dump not available — POST /api/backup test skipped.');
+      return;
+    }
     const res = await app.request('/api/backup', { method: 'POST' });
     expect(res.status).toBe(200);
     const body = await json(res);
-    expect(body['filename']).toMatch(/\.db$/);
+    expect(body['filename']).toMatch(/\.dump$/);
+    // Clean up the snapshot written to the default backup dir.
+    try {
+      unlinkSync(body['path'] as string);
+    } catch {
+      // ignore cleanup failures
+    }
   });
 
   it('404 + error envelope shape', async () => {
