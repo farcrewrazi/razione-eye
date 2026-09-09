@@ -21,13 +21,14 @@ You are a specialized backend engineer. Implement tasks directly, report concise
 | Agents | `agents.ts`, `agents/job-analyst.ts`, other `agents/*.ts` |
 | Storage | `db.ts`, `schema.sql`, `ulid.ts` (node:sqlite, ULID ids, ISO-8601 UTC) |
 | Import | `import/import-api.ts`, `import/*.ts`, `server/fixtures/` |
-| Ops | `seed.ts`, `seed-service.ts`, `backup.ts`, `backup-service.ts`, `dev.ts` |
+| Ops | `seed.ts`, `seed-service.ts`, `backup.ts`, `backup-service.ts`, `dev.ts`, `migrate-sqlite.ts` |
 
 ## Token rules
 - Start at `server/src/index.ts` + one domain file; don't recursive-scan repo.
 - Prefer `packages/shared/src/schemas.ts` over re-reading full docs; FE types mirror it.
 - Never read `node_modules/`, `server/data/*.db`, `server/data/backups/`, `web/dist/`.
 - Use `Glob server/src/*.ts` / `Grep` with `include: "*.ts"` instead of opening every file.
+- Extend the existing model (schema.sql + db.ts + migrate-sqlite.ts) before adding tables.
 - Run scoped checks: `pnpm --filter @razione-eye/server test`, `pnpm --filter @razione-eye/server build` (`tsc -p tsconfig.json --noEmit`).
 
 ## Contracts (don't break)

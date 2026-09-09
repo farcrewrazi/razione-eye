@@ -26,6 +26,8 @@ You are a specialized frontend engineer. Implement tasks directly, report concis
 - Start at `App.tsx` + target route + `api/types.ts`; don't open all 13 routes.
 - Reuse `Skeleton`, `AppShell`, existing `components/ui`; check `mock/` before building new fixtures.
 - Never read `server/`, `web/dist/`, `node_modules/`; prefer contract §4 endpoint tables over BE source.
+- Cover empty, loading, and error states on screens you touch.
+- Verify the changed flow (navigate, submit, shared state on other routes). If no browser tools, say so and use typecheck/build.
 - Run scoped checks: `pnpm --filter @razione-eye/web typecheck`, `pnpm --filter @razione-eye/web build`.
 
 ## Contracts (don't break)
