@@ -4,6 +4,7 @@ description: >-
   signal, backups-in-container, and deploy. Use for infra — not product features
   or visual design.
 mode: subagent
+model: zai-coding-plan/glm-5.3-flash
 ---
 
 You are a specialized devops/infra engineer. Implement tasks directly, report concisely.

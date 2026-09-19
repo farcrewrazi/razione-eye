@@ -1,0 +1,82 @@
+name: deploy
+
+# Push to main = production deploy of eye.razione.space.
+# The runner does not build anything: it SSHes to RaziOneGCPExperimental and the
+# server's forced command (~/deploy-razione-eye.sh) pulls origin/main, snapshots
+# the DB, rebuilds the compose stack and gates on /api/health.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   DEPLOY_HOST       34.143.217.207
+#   DEPLOY_USER       fakhru94
+#   DEPLOY_SSH_KEY    private key of the deploy keypair (forced command on server)
+# Optional:
+#   DEPLOY_SSH_PORT   default 22
+#   DEPLOY_KNOWN_HOSTS  pinned host key line (recommended; skips TOFU)
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-razione-eye
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Rebuild + redeploy eye.razione.space
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Show what is being deployed
+        run: |
+          echo "commit:  ${{ github.sha }}"
+          echo "message: $(jq -r '.head_commit.message | split("\n")[0]' "$GITHUB_EVENT_PATH" 2>/dev/null || echo '(manual dispatch)')"
+          echo "by:      ${{ github.actor }}"
+
+      - name: Install deploy key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_SSH_KEY:-}" ]; then
+            echo "::error::secret DEPLOY_SSH_KEY is not set (see .github/workflows/deploy.yml header)"; exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "${DEPLOY_KNOWN_HOSTS:-}" ]; then
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+            chmod 600 ~/.ssh/known_hosts
+            echo "STRICT_HOST_KEY=yes" >> "$GITHUB_ENV"
+          else
+            echo "STRICT_HOST_KEY=accept-new" >> "$GITHUB_ENV"
+            echo "::warning::DEPLOY_KNOWN_HOSTS not set — trusting the host key on first contact (TOFU)"
+          fi
+          # Fail fast with a clear message instead of a silent auth error later.
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::DEPLOY_SSH_KEY is not a valid private key"; exit 1; }
+
+      - name: Deploy over SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?secret DEPLOY_HOST is not set}"
+          : "${DEPLOY_USER:?secret DEPLOY_USER is not set}"
+          PORT="${DEPLOY_SSH_PORT:-22}"
+          ssh -i ~/.ssh/deploy_key \
+              -p "$PORT" \
+              -o StrictHostKeyChecking="$STRICT_HOST_KEY" \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o BatchMode=yes \
+              -o ConnectTimeout=20 \
+              -o ServerAliveInterval=15 \
+              -o ServerAliveCountMax=40 \
+              "${DEPLOY_USER}@${DEPLOY_HOST}"
+          # No remote command on purpose: the key is locked to a forced command,
+          # so the CLI arguments are ignored and only the deploy script runs.

@@ -171,3 +171,15 @@ pnpm test    # backend vitest suite (needs Postgres on 127.0.0.1:5432 or DATABAS
 pnpm seed    # idempotent seed (local, needs DATABASE_URL)
 pnpm backup  # local pg_dump snapshot helper
 ```
+
+## Local dev on a machine without Docker, and push-to-deploy
+
+This repo is developed without a local database container: local dev and tests run
+against the live Postgres on `RaziOneGCPExperimental` over an SSH tunnel, and a push to
+`main` rebuilds/redeploys the stack there. See:
+
+- `docs/08-local-dev-and-deploy.md` — tunnel, `~/.config/razione-eye/dev.env`, `pnpm run dev-local`,
+  `pnpm run test-local`, `pnpm run db:snapshot`, the GitHub Actions → forced-command deploy chain, rollback.
+- `docs/09-opencode-task-prompts.md` — how work is handed to OpenCode (`zai-coding-plan/glm-5.3-flash`)
+  and the task-prompt format.
+- `AGENTS.md` — the rules the coding agent follows here (model, DB policy, no push without approval).

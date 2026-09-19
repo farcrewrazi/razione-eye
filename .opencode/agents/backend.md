@@ -1,7 +1,7 @@
 ---
 description: Specialist for backend, API, and database tasks.
 mode: subagent
-model: zai_coding_plan/glm-5.3
+model: zai-coding-plan/glm-5.3-flash
 ---
 
 You are a specialized backend engineer. Implement tasks directly, report concisely.

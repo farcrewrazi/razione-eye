@@ -9,10 +9,14 @@
   "scripts": {
     "dev": "pnpm --filter @razione-eye/server dev",
     "dev-stack": "concurrently -n server,web -c blue,green \"pnpm --filter @razione-eye/server dev\" \"pnpm --filter @razione-eye/web dev\"",
-    "build": "pnpm -r build",
+    "build": "pnpm --filter @razione-eye/shared exec tsc -p tsconfig.json && pnpm -r build",
     "test": "pnpm -r test",
     "seed": "pnpm --filter @razione-eye/server seed",
-    "backup": "pnpm --filter @razione-eye/server backup"
+    "backup": "pnpm --filter @razione-eye/server backup",
+    "dev-local": "bash scripts/dev-local.sh",
+    "test-local": "bash scripts/test-local.sh",
+    "db:tunnel": "bash scripts/db-tunnel.sh",
+    "db:snapshot": "bash scripts/db-snapshot.sh"
   },
   "devDependencies": {
     "concurrently": "^10.0.5"

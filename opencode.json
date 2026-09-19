@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "zai-coding-plan/glm-5.3-flash",
+  "small_model": "zai-coding-plan/glm-5.3-flash",
+  "autoupdate": false,
+  "instructions": ["AGENTS.md", "docs/08-local-dev-and-deploy.md"],
+  "permission": {
+    "bash": {
+      "*": "allow",
+      "git push*": "ask",
+      "git reset --hard*": "ask",
+      "git checkout -- *": "ask",
+      "docker *": "ask",
+      "*TRUNCATE*": "deny",
+      "*DROP DATABASE*": "deny",
+      "*DROP TABLE*": "deny"
+    }
+  }
+}
