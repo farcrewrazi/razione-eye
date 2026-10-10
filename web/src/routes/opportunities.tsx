@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  ExternalLink,
   Inbox,
   Kanban,
   Plus,
@@ -90,6 +91,27 @@ function OpportunityRow({ o, onOpen }: { o: Opportunity; onOpen: (id: string) =>
         {o.data.location ?? '—'}
       </Td>
       <Td className="text-xs whitespace-nowrap text-[var(--color-muted)]">{salaryLabel(o.data)}</Td>
+      <Td className="text-xs whitespace-nowrap text-[var(--color-muted)]">
+        {o.data.source || o.data.url ? (
+          <span className="inline-flex items-center gap-1.5">
+            {o.data.source}
+            {o.data.url && (
+              <a
+                href={o.data.url}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                aria-label={`Open job posting${o.data.source ? ` on ${o.data.source}` : ''}`}
+                className="transition-colors hover:text-[var(--color-accent)]"
+              >
+                <ExternalLink className="size-3.5" />
+              </a>
+            )}
+          </span>
+        ) : (
+          '—'
+        )}
+      </Td>
       <Td className="text-xs whitespace-nowrap text-[var(--color-muted)]">
         {timeAgo(o.updated_at)}
       </Td>
@@ -494,6 +516,7 @@ export function OpportunitiesPage() {
                 <Th>Status</Th>
                 <Th>Location</Th>
                 <Th>Salary</Th>
+                <Th>Source</Th>
                 <Th>Updated</Th>
               </Tr>
             </Thead>

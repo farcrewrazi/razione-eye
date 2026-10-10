@@ -181,6 +181,8 @@ export interface OpportunityData {
   role: string
   location?: string
   url?: string
+  /** Human-readable discovery channel written by the import pipeline (e.g. "JobStreet"). */
+  source?: string
   salary?: string
   salary_min?: number
   salary_max?: number

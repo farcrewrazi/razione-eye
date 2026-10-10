@@ -57,13 +57,19 @@ describe('NodesRepo', () => {
   });
 
   it('lists with filters + pagination', async () => {
-    await repo.create({ type: 'TASK', name: 'a', status: 'TODO', due_at: '2026-09-10T00:00:00.000Z', data: { title: 'a' } });
-    await repo.create({ type: 'TASK', name: 'b', status: 'DONE', due_at: '2026-09-01T00:00:00.000Z', data: { title: 'b' } });
+    // Dates anchored to now: exactly one TASK is past-due (the `overdue`
+    // filter is `due_at < now()` regardless of status, so hardcoded calendar
+    // dates time-bomb as the clock moves past them).
+    const day = 86_400_000;
+    const past = new Date(Date.now() - 10 * day).toISOString();
+    const future = new Date(Date.now() + 10 * day).toISOString();
+    await repo.create({ type: 'TASK', name: 'a', status: 'TODO', due_at: past, data: { title: 'a' } });
+    await repo.create({ type: 'TASK', name: 'b', status: 'DONE', due_at: future, data: { title: 'b' } });
     await repo.create({ type: 'COMPANY', name: 'c', data: {} });
 
     expect((await repo.list({ type: 'TASK' })).total).toBe(2);
     expect((await repo.list({ type: 'TASK', status: 'TODO' })).total).toBe(1);
-    expect((await repo.list({ type: 'TASK', due_before: '2026-09-05T00:00:00.000Z' })).total).toBe(1);
+    expect((await repo.list({ type: 'TASK', due_before: new Date().toISOString() })).total).toBe(1);
     expect((await repo.list({ type: 'TASK', overdue: true })).total).toBe(1);
     expect((await repo.list({ q: 'ABC' })).total).toBe(0);
 

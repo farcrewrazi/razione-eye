@@ -1,8 +1,10 @@
 /**
- * Shared fixture loader for import tests — reads every importable file in
- * `server/fixtures/` (the ~30-job mixed-format corpus, T1.2) as ImportFileInput[].
+ * Shared fixture loader for import tests — reads the T1.2 mixed-format corpus
+ * (~30 jobs) as ImportFileInput[]. The corpus is pinned by filename so ad-hoc
+ * fixture files (e.g. pending research imports) can live in `server/fixtures/`
+ * without breaking the corpus-count assertions.
  */
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ImportFileInput } from '../../src/import/types.ts';
@@ -17,13 +19,18 @@ export const FORMAT_BY_EXT: Record<string, ImportFileInput['format']> = {
   '.txt': 'chat',
 };
 
+const CORPUS_FILES = [
+  'agent-chat-export.txt',
+  'jobs-export.csv',
+  'jobs-notes.md',
+  'jobs-notes-2.md',
+  'jobs-structured.json',
+];
+
 export function loadFixtures(): ImportFileInput[] {
-  return readdirSync(FIXTURES_DIR)
-    .sort()
-    .filter((name) => FORMAT_BY_EXT[name.slice(name.lastIndexOf('.'))] !== undefined)
-    .map((name) => ({
-      name,
-      format: FORMAT_BY_EXT[name.slice(name.lastIndexOf('.'))]!,
-      content: readFileSync(resolve(FIXTURES_DIR, name), 'utf8'),
-    }));
+  return CORPUS_FILES.map((name) => ({
+    name,
+    format: FORMAT_BY_EXT[name.slice(name.lastIndexOf('.'))]!,
+    content: readFileSync(resolve(FIXTURES_DIR, name), 'utf8'),
+  }));
 }
