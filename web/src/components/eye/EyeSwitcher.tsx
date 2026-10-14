@@ -2,8 +2,9 @@
  * EyeSwitcher — the Eye-focus dropdown in the TopBar.
  *
  * Trigger: eye icon + short label + ChevronDown; accented whenever the focus
- * isn't ALL. Popover lists ALL + the five eyes with descriptors; BUSINESS and
- * GROWTH are disabled and carry a PHASE badge until they come online.
+ * isn't ALL. Popover lists ALL + the five eyes with descriptors; GROWTH is
+ * disabled and carries a PHASE badge until it comes online; BUSINESS is
+ * selectable.
  *
  * Accessibility: trigger is a button with aria-haspopup="menu" / aria-expanded;
  * the popover is role="menu" with role="menuitemradio" options; Escape and

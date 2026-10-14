@@ -5,7 +5,7 @@
  * every surface (switcher, filters, badges) agrees:
  *
  *   CAREER   → JOB                          (live)
- *   BUSINESS → WEBSITE, CONSULTANCY         (Phase 3)
+ *   BUSINESS → WEBSITE, CONSULTANCY         (live)
  *   GROWTH   → AFFILIATE                    (Phase 4)
  *   SIGNAL   → CRYPTO (signals incl. GEM_CALL) (live)
  *   CONTROL  → — (cross-cutting: tasks, gate, agents, brief, profile)
@@ -40,7 +40,7 @@ export interface EyeDef {
   /** One-line descriptor shown under the label in the popover. */
   description: string
   icon: LucideIcon
-  /** Whether the eye is functional today (BUSINESS/GROWTH come online later). */
+  /** Whether the eye is functional today (GROWTH comes online later). */
   live: boolean
   /** Rollout phase for non-live eyes (rendered as a PHASE badge). */
   phase?: number
@@ -122,11 +122,10 @@ export const EYES: Record<EyeId, EyeDef> = {
     shortLabel: 'Business',
     description: 'Websites & consultancy leads — discovery to teaser.',
     icon: Store,
-    live: false,
-    phase: 3,
+    live: true,
     opportunityTypes: ['WEBSITE', 'CONSULTANCY'],
     signalTypes: ['BUSINESS_DISCOVERY'],
-    // Defined for when Phase 3 comes online — leads need tasks/gate/brief too.
+    // Leads need tasks/gate/brief too.
     navAllow: ['/', '/companies', '/signals', '/tasks', '/gate', '/daily-brief'],
   },
   GROWTH: {
