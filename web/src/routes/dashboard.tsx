@@ -48,7 +48,7 @@ const TODAY_ROWS: ReadonlyArray<{
   phase?: number
 }> = [
   { eye: 'CAREER', eyeId: 'CAREER', key: 'career', live: true },
-  { eye: 'BUSINESS', eyeId: 'BUSINESS', key: 'business', phase: 3 },
+  { eye: 'BUSINESS', eyeId: 'BUSINESS', key: 'business', live: true },
   { eye: 'AFFILIATE', eyeId: 'GROWTH', key: 'affiliate', phase: 4 },
   { eye: 'GEMS', eyeId: 'SIGNAL', key: 'gems', phase: 5 },
 ]

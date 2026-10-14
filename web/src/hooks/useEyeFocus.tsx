@@ -5,7 +5,7 @@
  * unreadable values fall back to ALL (same try/catch pattern as
  * loadViewPref in opportunities.tsx).
  *
- * Non-live eyes (BUSINESS Phase 3, GROWTH Phase 4) can't be selected via the
+ * Non-live eyes (GROWTH Phase 4) can't be selected via the
  * switcher, but `setEye` accepts them so a persisted value / deep-link keeps
  * working when they come online.
  */
