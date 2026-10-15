@@ -15,6 +15,8 @@ const OpportunityDetailPage = lazy(() => import('@/routes/opportunities-detail')
 const TasksPage = lazy(() => import('@/routes/tasks'))
 const CompaniesPage = lazy(() => import('@/routes/companies'))
 const CompanyDetailPage = lazy(() => import('@/routes/companies-detail'))
+const ProspectsPage = lazy(() => import('@/routes/prospects'))
+const ProspectDetailPage = lazy(() => import('@/routes/prospects-detail'))
 const SignalsPage = lazy(() => import('@/routes/signals'))
 const GatePage = lazy(() => import('@/routes/gate'))
 const AgentsPage = lazy(() => import('@/routes/agents'))
@@ -62,6 +64,9 @@ const router = createBrowserRouter([
       { path: 'tasks', element: lazyPage(<TasksPage />) },
       { path: 'companies', element: lazyPage(<CompaniesPage />) },
       { path: 'companies/:id', element: lazyPage(<CompanyDetailPage />) },
+      // Business Eye — the 30 pitch prospects (EYE-6); detail body lands in EYE-7.
+      { path: 'prospects', element: lazyPage(<ProspectsPage />) },
+      { path: 'prospects/:id', element: lazyPage(<ProspectDetailPage />) },
       { path: 'signals', element: lazyPage(<SignalsPage />) },
       { path: 'gate', element: lazyPage(<GatePage />) },
       { path: 'agents', element: lazyPage(<AgentsPage />) },

@@ -20,6 +20,7 @@ import type {
   TaskData,
 } from '../types'
 import { bandForScore } from './band'
+import { mockProspectCompanies, mockProspectOpportunities } from './prospects'
 
 // ─── id / time helpers ────────────────────────────────────────────────────────
 
@@ -233,9 +234,9 @@ export const mockAgents: Agent[] = [
   },
 ]
 
-// ─── Companies (12 Cyberjaya/KL software houses) ──────────────────────────────
+// ─── Companies (12 Cyberjaya/KL software houses + EYE-5 pitch prospects) ──────
 
-export const mockCompanies: Company[] = [
+const mockCoreCompanies: Company[] = [
   {
     id: '01JDYCOMPANY0000000000001',
     type: 'COMPANY',
@@ -505,6 +506,9 @@ export const mockCompanies: Company[] = [
   },
 ]
 
+/** Core seed + EYE-5 pitch prospects — the full company set mock mode serves. */
+export const mockCompanies: Company[] = [...mockCoreCompanies, ...mockProspectCompanies]
+
 // ─── Job opportunities (12 — every JOB status at least once, all four bands) ──
 
 function job(partial: {
@@ -576,7 +580,7 @@ function job(partial: {
   }
 }
 
-export const mockOpportunities: Opportunity[] = [
+export const mockJobOpportunities: Opportunity[] = [
   // PRIORITY band (≥90) — the 91% ABC Technology apply card (next_best_action)
   job({
     id: '01JDYJOB0000000000000001',
@@ -793,6 +797,9 @@ export const mockOpportunities: Opportunity[] = [
     tags: ['job', 'terminal'],
   }),
 ]
+
+/** Job pipeline + EYE-5 pitch prospects — the full opportunity set. */
+export const mockOpportunities: Opportunity[] = [...mockJobOpportunities, ...mockProspectOpportunities]
 
 // ─── Signals (10, mixed types/sources/dispositions) ───────────────────────────
 

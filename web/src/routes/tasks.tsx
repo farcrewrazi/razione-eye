@@ -185,7 +185,7 @@ function NewTaskPanel({ open, onToggle }: { open: boolean; onToggle: () => void 
 
 function TaskRow({ t, opportunities, onStatus }: {
   t: Task
-  opportunities: Map<string, string> // id → name
+  opportunities: Map<string, string | undefined> // id → name (undefined = unresolved → generic chip)
   onStatus: (id: string, status: TaskStatus) => void
 }) {
   const overdue = isOverdue(t)

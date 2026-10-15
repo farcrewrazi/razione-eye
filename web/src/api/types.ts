@@ -58,6 +58,22 @@ export const BAND_RULES = [
   { band: 'ARCHIVE', min: 0, description: 'score < 60 (or null score)' },
 ] as const
 
+/**
+ * Business-prospect campaign bands (EYE-5 import; mirror of shared
+ * `prospectBandSchema`) — how the pitch campaign ranked each prospect. Lives in
+ * opportunity.data.band; the top-level `band` stays score-derived (SCORE_BANDS).
+ */
+export const PROSPECT_BANDS = ['PRIORITY', 'STRONG', 'REVIEW', 'ARCHIVE'] as const
+export type ProspectBand = (typeof PROSPECT_BANDS)[number]
+
+/** Business-prospect sub-scores, 0–100 each (doc 02 §6.3; shared `prospectSubScoresSchema`). */
+export interface ProspectSubScores {
+  problem_severity?: number
+  budget_hint?: number
+  reachability?: number
+  fit?: number
+}
+
 export const SIGNAL_TYPES = ['JOB_POSTING', 'SOCIAL_POST', 'COMMENT', 'BUSINESS_DISCOVERY', 'GEM_CALL'] as const
 
 export const SIGNAL_SOURCES = [
@@ -80,7 +96,13 @@ export const TASK_STATUSES = ['TODO', 'IN_PROGRESS', 'DONE', 'CANCELLED'] as con
 
 export const TASK_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH'] as const
 
-export const GATE_ACTION_TYPES = ['apply_to_job'] as const
+/**
+ * `prepare_pitch` (EYE-6) is wired FE-side but NOT yet accepted by the server:
+ * GATE_ACTION_TYPES in packages/shared still holds only `apply_to_job`, so the
+ * live API answers 422 VALIDATION for it until shared + server/gate.ts catch up
+ * (per-type payload validation, pitch-aware summary, approve semantics).
+ */
+export const GATE_ACTION_TYPES = ['apply_to_job', 'prepare_pitch'] as const
 export const GATE_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const
 export const GATE_DECISIONS = ['approved', 'edited_approved', 'rejected'] as const
 
@@ -177,8 +199,9 @@ export interface NextAction {
 }
 
 export interface OpportunityData {
-  // JOB payload (contract §2); other opportunity types are permissive in Phase 0
-  role: string
+  // JOB payload (contract §2); other opportunity types are permissive in Phase
+  // 0 — WEBSITE/CONSULTANCY rows (e.g. the EYE-5 prospects) carry no `role`.
+  role?: string
   location?: string
   url?: string
   /** Human-readable discovery channel written by the import pipeline (e.g. "JobStreet"). */
@@ -196,6 +219,15 @@ export interface OpportunityData {
   applied_date?: string
   problems_detected?: string[]
   suggested_offer?: unknown
+  // EYE-5 business-prospect payload (WEBSITE/CONSULTANCY) — mirror of shared
+  // permissiveOpportunityDataSchema; JOB entries omit these.
+  band?: ProspectBand
+  segment?: string
+  sub_scores?: ProspectSubScores
+  agentic_fit?: number
+  suggested_agentic_offer?: string
+  source_url?: string
+  fit_reason?: string
   [key: string]: unknown // permissive for WEBSITE/CONSULTANCY/AFFILIATE/CRYPTO
 }
 

@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   Store,
   Sunrise,
+  Target,
   TrendingUp,
   type LucideIcon,
 } from 'lucide-react'
@@ -32,6 +33,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/opportunities', label: 'Opportunities', icon: Briefcase },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/companies', label: 'Companies', icon: Building2 },
+  { to: '/prospects', label: 'Prospects', icon: Target },
   { to: '/signals', label: 'Signals', icon: Radio },
   { to: '/gate', label: 'Action Gate', icon: ShieldCheck },
   { to: '/agents', label: 'Agents', icon: Bot },
