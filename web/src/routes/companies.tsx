@@ -1,8 +1,14 @@
 /**
  * Companies — the company graph as a responsive card grid (docs/01 §6 module 5).
  *
- * Each card: name, industry + size, stack chips, location, open-roles/avg-score
- * stat row, ai_culture_notes as subtle lines, website link. Click →
+ * Eye-scoped: Career lists employers linked to JOB opportunities, Business
+ * lists pitch targets linked to WEBSITE/CONSULTANCY ones; ALL/CONTROL list
+ * every company. Companies carry no eye field, so membership is derived
+ * client-side from linked opportunities (`opportunityInEye`).
+ *
+ * Each card: name, industry + size, stack chips, location, eye-specific stat
+ * row (Career: open roles / avg score; Business: opportunities / pitch score
+ * + band badge), ai_culture_notes as subtle lines, website link. Click →
  * /companies/:id detail. Sort: most open roles (default) / name / avg score.
  */
 
@@ -12,40 +18,63 @@ import { useNavigate } from 'react-router'
 import { AlertTriangle, Building2, ExternalLink, MapPin, Search, Sparkles } from 'lucide-react'
 import { listCompanies, listOpportunities } from '@/api/provider'
 import { JOB_TERMINAL_STATUSES } from '@/api/types'
-import type { Company, Opportunity } from '@/api/types'
-import { EmptyState, PageHeader } from '@/components/common'
+import type { Company, Opportunity, ScoreBand } from '@/api/types'
+import { BandBadge, EmptyState, PageHeader } from '@/components/common'
 import { Badge, Button, Card, Input, Select, Skeleton } from '@/components/ui'
 import { useEyeFocus } from '@/hooks/useEyeFocus'
-import { opportunityInEye } from '@/lib/eyes'
+import { opportunityInEye, type EyeId } from '@/lib/eyes'
 import { scoreColor } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 /* ─── Per-company stats (derived client-side) ───────────────────────────────── */
 
 interface CompanyStats {
+  /** All linked opportunities in the focused eye. */
+  total: number
   /** Linked opportunities with non-terminal status. */
   open: number
   /** Mean score across scored opportunities; null when none scored. */
   avgScore: number | null
+  /** Best score in the eye — the pitch score; null when none scored. */
+  bestScore: number | null
+  /** Band of the best-scored opportunity; null when none scored. */
+  bestBand: ScoreBand | null
 }
 
-/** Open count + average score per company id, derived from the JOB pipeline. */
-function deriveCompanyStats(jobs: Opportunity[]): Map<string, CompanyStats> {
-  const acc = new Map<string, { open: number; scoreSum: number; scored: number }>()
-  for (const o of jobs) {
+/** Pipeline stats per company id, derived from the eye-narrowed opportunities. */
+function deriveCompanyStats(opportunities: Opportunity[]): Map<string, CompanyStats> {
+  const acc = new Map<
+    string,
+    {
+      total: number
+      open: number
+      scoreSum: number
+      scored: number
+      best: { score: number; band: ScoreBand } | null
+    }
+  >()
+  for (const o of opportunities) {
     const companyId = o.data.company_id
     if (typeof companyId !== 'string') continue
-    const s = acc.get(companyId) ?? { open: 0, scoreSum: 0, scored: 0 }
+    const s = acc.get(companyId) ?? { total: 0, open: 0, scoreSum: 0, scored: 0, best: null }
+    s.total += 1
     if (o.status != null && !(JOB_TERMINAL_STATUSES as readonly string[]).includes(o.status)) s.open += 1
     if (o.score != null) {
       s.scoreSum += o.score
       s.scored += 1
+      if (s.best === null || o.score > s.best.score) s.best = { score: o.score, band: o.band }
     }
     acc.set(companyId, s)
   }
   const out = new Map<string, CompanyStats>()
   for (const [id, s] of acc) {
-    out.set(id, { open: s.open, avgScore: s.scored > 0 ? Math.round(s.scoreSum / s.scored) : null })
+    out.set(id, {
+      total: s.total,
+      open: s.open,
+      avgScore: s.scored > 0 ? Math.round(s.scoreSum / s.scored) : null,
+      bestScore: s.best?.score ?? null,
+      bestBand: s.best?.band ?? null,
+    })
   }
   return out
 }
@@ -55,10 +84,12 @@ function deriveCompanyStats(jobs: Opportunity[]): Map<string, CompanyStats> {
 function CompanyCard({
   c,
   stats,
+  eye,
   onOpen,
 }: {
   c: Company
   stats?: CompanyStats
+  eye: EyeId
   onOpen: (id: string) => void
 }) {
   const d = c.data
@@ -125,28 +156,56 @@ function CompanyCard({
         )}
       </div>
 
-      {/* Stat row — open roles + average score */}
+      {/* Stat row — pitch stats under Business, open roles + avg score otherwise */}
       <div className="flex items-center gap-3 border-t border-[var(--color-border)]/50 pt-2.5 text-xs">
-        <span className="inline-flex items-center gap-1.5 text-[var(--color-muted)]">
-          <span
-            className={cn(
-              'font-mono text-sm font-semibold tabular-nums',
-              stats && stats.open > 0 ? 'text-[var(--color-text)]' : 'text-[var(--color-muted)]/60',
-            )}
-          >
-            {stats ? stats.open : '—'}
-          </span>
-          open
-        </span>
-        <span className="inline-flex items-center gap-1.5 text-[var(--color-muted)]">
-          <span
-            className="font-mono text-sm font-semibold tabular-nums"
-            style={stats?.avgScore != null ? { color: scoreColor(stats.avgScore) } : { color: 'var(--color-muted)' }}
-          >
-            {stats?.avgScore != null ? stats.avgScore : '—'}
-          </span>
-          avg
-        </span>
+        {eye === 'BUSINESS' ? (
+          <>
+            <span className="inline-flex items-center gap-1.5 text-[var(--color-muted)]">
+              <span
+                className={cn(
+                  'font-mono text-sm font-semibold tabular-nums',
+                  stats && stats.total > 0 ? 'text-[var(--color-text)]' : 'text-[var(--color-muted)]/60',
+                )}
+              >
+                {stats ? stats.total : '—'}
+              </span>
+              opps
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-[var(--color-muted)]">
+              <span
+                className="font-mono text-sm font-semibold tabular-nums"
+                style={stats?.bestScore != null ? { color: scoreColor(stats.bestScore) } : { color: 'var(--color-muted)' }}
+              >
+                {stats?.bestScore != null ? stats.bestScore : '—'}
+              </span>
+              pitch
+            </span>
+            {stats?.bestBand != null && <BandBadge band={stats.bestBand} className="ml-auto" />}
+          </>
+        ) : (
+          <>
+            <span className="inline-flex items-center gap-1.5 text-[var(--color-muted)]">
+              <span
+                className={cn(
+                  'font-mono text-sm font-semibold tabular-nums',
+                  stats && stats.open > 0 ? 'text-[var(--color-text)]' : 'text-[var(--color-muted)]/60',
+                )}
+              >
+                {stats ? stats.open : '—'}
+              </span>
+              open
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-[var(--color-muted)]">
+              <span
+                className="font-mono text-sm font-semibold tabular-nums"
+                style={stats?.avgScore != null ? { color: scoreColor(stats.avgScore) } : { color: 'var(--color-muted)' }}
+              >
+                {stats?.avgScore != null ? stats.avgScore : '—'}
+              </span>
+              avg
+            </span>
+          </>
+        )}
       </div>
 
       {/* AI culture notes — subtle lines */}
@@ -166,17 +225,22 @@ function CompanyCard({
 
 /* ─── Page ──────────────────────────────────────────────────────────────────── */
 
-/** Sort modes — default Most open. */
+/** Sort modes — default Most open. Labels adapt to the focused eye. */
 type CompanySort = 'open' | 'name' | 'avg'
 const SORT_LABELS: Record<CompanySort, string> = {
   open: 'Most open roles',
   name: 'Name (A–Z)',
   avg: 'Highest avg score',
 }
+const BUSINESS_SORT_LABELS: Record<CompanySort, string> = {
+  open: 'Most opportunities',
+  name: 'Name (A–Z)',
+  avg: 'Highest pitch score',
+}
 
 export function CompaniesPage() {
   const navigate = useNavigate()
-  const { eye } = useEyeFocus()
+  const { eye, def, focused } = useEyeFocus()
   const [q, setQ] = useState('')
   const [sort, setSort] = useState<CompanySort>('open')
 
@@ -196,41 +260,77 @@ export function CompaniesPage() {
     placeholderData: (prev) => prev,
   })
 
-  // Stats source — all opportunities (open count + avg score per company),
-  // narrowed to the focused eye (T1.13); ALL / CONTROL see every type.
-  const { data: jobs } = useQuery({
+  // Opportunities source — per-company stats AND eye membership: companies
+  // carry no eye field, so a company belongs to the eyes of its linked
+  // opportunities. ALL / CONTROL see every type.
+  const { data: jobs, isPending: jobsPending, isError: jobsError } = useQuery({
     queryKey: ['companies-stats', 'jobs'],
     queryFn: () => listOpportunities({ limit: 500 }),
     placeholderData: (prev) => prev,
   })
-  const stats = useMemo(
-    () => deriveCompanyStats((jobs?.items ?? []).filter((o) => opportunityInEye(o.opportunity_type, eye))),
+  const inEye = useMemo(
+    () => (jobs?.items ?? []).filter((o) => opportunityInEye(o.opportunity_type, eye)),
     [jobs, eye],
   )
+  const stats = useMemo(() => deriveCompanyStats(inEye), [inEye])
 
+  // Eye-scoped membership — null disables filtering (ALL / CONTROL). On stats
+  // error the graph falls back to unfiltered rather than a dead page.
+  const eyeScoped = focused && eye !== 'CONTROL'
+  const eyeCompanyIds = useMemo(() => {
+    if (!eyeScoped || jobsError) return null
+    const ids = new Set<string>()
+    for (const o of inEye) {
+      const companyId = o.data.company_id
+      if (typeof companyId === 'string') ids.add(companyId)
+    }
+    return ids
+  }, [eyeScoped, jobsError, inEye])
+
+  const business = eye === 'BUSINESS'
   const open = (id: string): void => void navigate(`/companies/${id}`)
   const items = useMemo(() => {
-    const list = data?.items ?? []
+    const list = eyeCompanyIds ? (data?.items ?? []).filter((c) => eyeCompanyIds.has(c.id)) : (data?.items ?? [])
     const sorted = [...list]
     if (sort === 'name') {
       sorted.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
     } else if (sort === 'avg') {
-      sorted.sort((a, b) => (stats.get(b.id)?.avgScore ?? -1) - (stats.get(a.id)?.avgScore ?? -1))
+      const score = (id: string): number => {
+        const s = stats.get(id)
+        return business ? (s?.bestScore ?? -1) : (s?.avgScore ?? -1)
+      }
+      sorted.sort((a, b) => score(b.id) - score(a.id))
     } else {
-      sorted.sort((a, b) => (stats.get(b.id)?.open ?? 0) - (stats.get(a.id)?.open ?? 0))
+      const count = (id: string): number => {
+        const s = stats.get(id)
+        return business ? (s?.total ?? 0) : (s?.open ?? 0)
+      }
+      sorted.sort((a, b) => count(b.id) - count(a.id))
     }
     return sorted
-  }, [data, sort, stats])
+  }, [data, sort, stats, eyeCompanyIds, business])
   const total = data?.total ?? 0
+
+  // Hold the skeleton while membership is still loading — filtering against an
+  // empty set would flash the eye's empty state before opportunities arrive.
+  const showPending = isPending || (eyeScoped && jobsPending)
+
+  const subtitle = !eyeScoped
+    ? 'Companies in the graph with linked opportunities.'
+    : eye === 'CAREER'
+      ? 'Career Eye — employers in your job pipeline.'
+      : eye === 'BUSINESS'
+        ? "Business Eye — pitch targets you're pursuing."
+        : `${def.label} — companies with ${def.opportunityTypes.join(' + ')} opportunities.`
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Companies"
-        subtitle="Companies in the graph with linked opportunities."
+        subtitle={subtitle}
         actions={
           <span className="font-mono text-xs tracking-wider text-[var(--color-muted)] tabular-nums">
-            {isPending ? '…' : `${total} TOTAL`}
+            {showPending ? '…' : `${eyeScoped ? items.length : total} TOTAL`}
           </span>
         }
       />
@@ -255,14 +355,14 @@ export function CompaniesPage() {
         >
           {(Object.keys(SORT_LABELS) as CompanySort[]).map((key) => (
             <option key={key} value={key}>
-              {SORT_LABELS[key]}
+              {(business ? BUSINESS_SORT_LABELS : SORT_LABELS)[key]}
             </option>
           ))}
         </Select>
       </div>
 
       {/* Grid */}
-      {isPending ? (
+      {showPending ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-48 rounded-lg" />
@@ -282,17 +382,19 @@ export function CompaniesPage() {
       ) : items.length === 0 ? (
         <EmptyState
           icon={<Building2 />}
-          title={q ? 'No matches' : 'No companies yet'}
+          title={q ? 'No matches' : eyeScoped ? `No ${def.shortLabel} Eye companies` : 'No companies yet'}
           hint={
             q
               ? 'Nothing matches the search — clear it to see the full graph.'
-              : 'Companies appear here once discovered by the scouts.'
+              : eyeScoped
+                ? `${def.label} lists companies with ${def.opportunityTypes.join(' + ')} opportunities — reset the focus to All to see the full graph.`
+                : 'Companies appear here once discovered by the scouts.'
           }
         />
       ) : (
         <div className={cn('grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3', data?.items !== undefined && 'transition-opacity')}>
           {items.map((c) => (
-            <CompanyCard key={c.id} c={c} stats={stats.get(c.id)} onOpen={open} />
+            <CompanyCard key={c.id} c={c} stats={stats.get(c.id)} eye={eye} onOpen={open} />
           ))}
         </div>
       )}
