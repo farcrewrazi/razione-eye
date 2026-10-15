@@ -344,12 +344,39 @@ export const jobOpportunityDataSchema = z
   })
   .passthrough();
 
+/**
+ * Business-prospect campaign bands (EYE-5, 12-final-30.json) — how the pitch
+ * campaign ranked each prospect. Deliberately distinct from SCORE_BANDS: the
+ * API's top-level `band` stays score-derived (bandForScore), the campaign band
+ * lives in opportunity.data.band.
+ */
+export const PROSPECT_BANDS = ['PRIORITY', 'STRONG', 'REVIEW', 'ARCHIVE'] as const;
+export const prospectBandSchema = z.enum(PROSPECT_BANDS);
+
+/** Business-prospect sub-scores (doc 02 §6.3) — 0–100 each. */
+export const prospectSubScoresSchema = z
+  .object({
+    problem_severity: scoreSchema.optional(),
+    budget_hint: scoreSchema.optional(),
+    reachability: scoreSchema.optional(),
+    fit: scoreSchema.optional(),
+  })
+  .strict();
+
 /** WEBSITE / CONSULTANCY / AFFILIATE / CRYPTO payloads stay permissive in Phase 0 (Phases 3–5 fill them). */
 export const permissiveOpportunityDataSchema = z
   .object({
     next_action: nextActionSchema.optional(),
     problems_detected: z.array(z.string()).optional(),
     suggested_offer: z.unknown().optional(),
+    // EYE-5 business-prospect payload (12-final-30.json import):
+    sub_scores: prospectSubScoresSchema.optional(),
+    band: prospectBandSchema.optional(),
+    segment: z.string().optional(),
+    agentic_fit: scoreSchema.optional(),
+    suggested_agentic_offer: z.string().optional(),
+    source_url: z.string().optional(),
+    fit_reason: z.string().optional(),
   })
   .passthrough();
 
@@ -755,6 +782,8 @@ export interface SubScores {
 }
 export type NextAction = z.infer<typeof nextActionSchema>;
 export type JobOpportunityData = z.infer<typeof jobOpportunityDataSchema>;
+export type ProspectBand = z.infer<typeof prospectBandSchema>;
+export type ProspectSubScores = z.infer<typeof prospectSubScoresSchema>;
 export type TaskData = z.infer<typeof taskDataSchema>;
 export type SignalData = z.infer<typeof signalDataSchema>;
 export type AgentRun = z.infer<typeof agentRunSchema>;
