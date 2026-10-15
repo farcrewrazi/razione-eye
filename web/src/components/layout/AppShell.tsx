@@ -3,7 +3,7 @@
  * Dark command-center aesthetic: dense, crisp, single accent color.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { Link } from 'react-router'
 import { ChevronsLeft, ChevronsRight, X } from 'lucide-react'
@@ -11,6 +11,7 @@ import { Toaster } from '@/components/ui/toast'
 import { EyeSwitcher } from '@/components/eye/EyeSwitcher'
 import { EyeFocusProvider, useEyeFocus } from '@/hooks/useEyeFocus'
 import { NAV_ITEMS, crumbsFor } from '@/lib/nav'
+import { EYE_HOME, type EyeId } from '@/lib/eyes'
 import { cn } from '@/lib/utils'
 
 const API_MODE = import.meta.env.VITE_API_MODE ?? 'mock'
@@ -217,22 +218,32 @@ function TopBar() {
 }
 
 /**
- * Focus redirect — when the focused eye changes and the current route is no
- * longer in the eye's navAllow, bounce to '/' (the per-eye home anchor) so the
- * user never sits on a surface their sidebar can't reach. '/profile' is an
- * avatar route outside the sidebar — never blocked. Deep links to hidden
- * routes still render; the guard only fires on eye changes.
+ * Focus redirect — fires only when the focused eye CHANGES (never on plain
+ * navigation, so deep links to hidden routes still render). Switching lands
+ * on the new eye's home route (EYE_HOME): ALL/CONTROL always go to '/'
+ * (the four-row overview), and a focused eye never stays on '/' — it owns
+ * its own workspace URL. Shared routes (in the new eye's navAllow) keep the
+ * user in place; orphans bounce to the eye's home, not '/'. '/profile' is an
+ * avatar route outside the sidebar — never blocked.
  */
 function EyeFocusRedirect() {
   const { eye, def } = useEyeFocus()
   const { pathname } = useLocation()
   const navigate = useNavigate()
+  const prevEye = useRef<EyeId>(eye)
 
   useEffect(() => {
-    if (eye === 'ALL' || pathname === '/profile') return
+    if (eye === prevEye.current) return
+    prevEye.current = eye
+    const home = EYE_HOME[eye]
+    if (pathname === home) return
+    if (eye === 'ALL' || eye === 'CONTROL' || pathname === '/') {
+      navigate(home, { replace: true })
+      return
+    }
     const base = `/${pathname.split('/')[1] ?? ''}`
-    if (!def.navAllow.includes(base)) {
-      navigate('/', { replace: true })
+    if (base !== '/profile' && !def.navAllow.includes(base)) {
+      navigate(home, { replace: true })
     }
   }, [eye, def, pathname, navigate])
 

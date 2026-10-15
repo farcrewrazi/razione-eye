@@ -12,7 +12,9 @@
  *
  * Confirmed: CRYPTO / GEM_CALL belong to Signal Eye; Growth Eye = AFFILIATE only.
  * Content is filtered where eye-tagged; sidebar nav is narrowed per eye via
- * `navAllow` (ALL bypasses). Dashboard '/' is in every eye as home/reset anchor.
+ * `navAllow` (ALL bypasses). '/' stays in every eye as the overview/reset
+ * anchor, and each focused eye has its own home route (EYE_HOME) — switching
+ * eyes lands there, not on the Control dashboard.
  */
 
 import {
@@ -50,7 +52,8 @@ export interface EyeDef {
   signalTypes: readonly SignalType[]
   /**
    * Sidebar routes (NavItem.to values) visible under this eye. ALL lists every
-   * route (no filtering). '/' is always included — home/reset anchor.
+   * route (no filtering). '/' is always included — overview/reset anchor — and
+   * a focused eye's own home (EYE_HOME[id]) is in its navAllow.
    */
   navAllow: readonly string[]
 }
@@ -79,6 +82,10 @@ export function normalizeOpportunityType(type: OpportunityType | null | undefine
  */
 export const ALL_NAV_ROUTES: readonly string[] = [
   '/',
+  '/career',
+  '/business',
+  '/growth',
+  '/signal',
   '/opportunities',
   '/tasks',
   '/companies',
@@ -87,6 +94,20 @@ export const ALL_NAV_ROUTES: readonly string[] = [
   '/agents',
   '/daily-brief',
 ]
+
+/**
+ * Home route per eye — where an eye switch lands (EYE-4). ALL and CONTROL
+ * home to '/' (the four-row overview / ops layer); each focused eye homes to
+ * its own workspace. Every value is also in that eye's navAllow.
+ */
+export const EYE_HOME: Record<EyeId, string> = {
+  ALL: '/',
+  CAREER: '/career',
+  BUSINESS: '/business',
+  GROWTH: '/growth',
+  SIGNAL: '/signal',
+  CONTROL: '/',
+}
 
 export const EYES: Record<EyeId, EyeDef> = {
   ALL: {
@@ -114,7 +135,7 @@ export const EYES: Record<EyeId, EyeDef> = {
     // loop. '/signals' removed: the Signals inbox moved into the
     // Opportunities Inbox tab for Career. '/agents' excluded: Control-layer
     // ops registry, cross-eye noise.
-    navAllow: ['/', '/opportunities', '/companies', '/tasks', '/gate', '/daily-brief'],
+    navAllow: ['/', '/career', '/opportunities', '/companies', '/tasks', '/gate', '/daily-brief'],
   },
   BUSINESS: {
     id: 'BUSINESS',
@@ -125,8 +146,10 @@ export const EYES: Record<EyeId, EyeDef> = {
     live: true,
     opportunityTypes: ['WEBSITE', 'CONSULTANCY'],
     signalTypes: ['BUSINESS_DISCOVERY'],
-    // Leads need tasks/gate/brief too.
-    navAllow: ['/', '/companies', '/signals', '/tasks', '/gate', '/daily-brief'],
+    // Leads need tasks/gate/brief too. '/opportunities' excluded — business
+    // work lives in /prospects + /pitches once those routes exist (EYE-6/7);
+    // until then they stay out of navAllow entirely.
+    navAllow: ['/', '/business', '/companies', '/signals', '/tasks', '/gate', '/daily-brief'],
   },
   GROWTH: {
     id: 'GROWTH',
@@ -139,7 +162,7 @@ export const EYES: Record<EyeId, EyeDef> = {
     opportunityTypes: ['AFFILIATE'],
     signalTypes: [],
     // Phase 4 placeholder — content ops need tasks/brief; no companies/signals.
-    navAllow: ['/', '/opportunities', '/tasks', '/gate', '/daily-brief'],
+    navAllow: ['/', '/growth', '/opportunities', '/tasks', '/gate', '/daily-brief'],
   },
   SIGNAL: {
     id: 'SIGNAL',
@@ -152,7 +175,7 @@ export const EYES: Record<EyeId, EyeDef> = {
     signalTypes: ['GEM_CALL'],
     // Agents kept: crypto detections are agent-produced, so the registry is
     // in-workflow here (unlike Career). No opportunities/tasks/gate surfaces.
-    navAllow: ['/', '/signals', '/agents', '/daily-brief'],
+    navAllow: ['/', '/signal', '/signals', '/agents', '/daily-brief'],
   },
   CONTROL: {
     id: 'CONTROL',

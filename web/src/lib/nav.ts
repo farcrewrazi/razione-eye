@@ -5,10 +5,13 @@ import {
   Briefcase,
   Building2,
   CheckSquare,
+  Gem,
   LayoutDashboard,
   Radio,
   ShieldCheck,
+  Store,
   Sunrise,
+  TrendingUp,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -20,6 +23,12 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+  // Per-eye homes (EYE-4) — where switching to that eye lands. The "Eye"
+  // suffix keeps /signal ("Signal Eye") distinct from /signals ("Signals").
+  { to: '/career', label: 'Career Eye', icon: Briefcase },
+  { to: '/business', label: 'Business Eye', icon: Store },
+  { to: '/growth', label: 'Growth Eye', icon: TrendingUp },
+  { to: '/signal', label: 'Signal Eye', icon: Gem },
   { to: '/opportunities', label: 'Opportunities', icon: Briefcase },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/companies', label: 'Companies', icon: Building2 },

@@ -50,6 +50,12 @@ const router = createBrowserRouter([
     element: <AppShell />,
     children: [
       { index: true, element: lazyPage(<DashboardPage />) },
+      // Per-eye homes (EYE-4) — same eye-scoped dashboard, addressable per
+      // eye; switching eyes lands here (see EYE_HOME + EyeFocusRedirect).
+      { path: 'career', element: lazyPage(<DashboardPage />) },
+      { path: 'business', element: lazyPage(<DashboardPage />) },
+      { path: 'growth', element: lazyPage(<DashboardPage />) },
+      { path: 'signal', element: lazyPage(<DashboardPage />) },
       { path: 'opportunities', element: lazyPage(<OpportunitiesPage />) },
       { path: 'opportunities/new', element: lazyPage(<OpportunityNewPage />) },
       { path: 'opportunities/:id', element: lazyPage(<OpportunityDetailPage />) },
