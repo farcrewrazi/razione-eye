@@ -90,6 +90,7 @@ export const ALL_NAV_ROUTES: readonly string[] = [
   '/tasks',
   '/companies',
   '/prospects',
+  '/pitches',
   '/signals',
   '/gate',
   '/agents',
@@ -148,9 +149,9 @@ export const EYES: Record<EyeId, EyeDef> = {
     opportunityTypes: ['WEBSITE', 'CONSULTANCY'],
     signalTypes: ['BUSINESS_DISCOVERY'],
     // Leads need tasks/gate/brief too. '/opportunities' excluded — business
-    // work lives in /prospects (EYE-6; /pitches follows in EYE-7), which stays
-    // out of Career's workflow.
-    navAllow: ['/', '/business', '/companies', '/prospects', '/signals', '/tasks', '/gate', '/daily-brief'],
+    // work lives in /prospects + /pitches (EYE-6/EYE-7), which stays out of
+    // Career's workflow.
+    navAllow: ['/', '/business', '/companies', '/prospects', '/pitches', '/signals', '/tasks', '/gate', '/daily-brief'],
   },
   GROWTH: {
     id: 'GROWTH',

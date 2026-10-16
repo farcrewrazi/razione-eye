@@ -1,17 +1,30 @@
 /**
- * Prospect detail — EYE-6 stub. Identity + the pitch-relevant payload
- * (score/band/segment/agentic fit, fit reason, sub-scores, source) so a row
- * click lands somewhere real; the full pitch workspace is EYE-7.
+ * Prospect detail (EYE-7) — the pitch workspace for one business prospect:
+ * company facts, the detected problem, the suggested offer, agentic fit +
+ * sub-scores, the source link, and THE PLAN (Discovery → Pitch → Pilot →
+ * Retainer) with the current step. Read-only — the only output in this loop
+ * is a prepare_pitch draft sitting in the Action Gate (/gate decides,
+ * /pitches watches).
  */
 
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router'
-import { AlertTriangle, ArrowLeft, ExternalLink, MapPin, Sparkles } from 'lucide-react'
-import { getOpportunity } from '@/api/provider'
-import type { ApiNode, CompanyData } from '@/api/types'
-import { EmptyState } from '@/components/common'
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Building2,
+  Check,
+  ExternalLink,
+  MapPin,
+} from 'lucide-react'
+import { getOpportunity, listGateActions } from '@/api/provider'
+import type { ApiNode, CompanyData, GateAction } from '@/api/types'
+import { EmptyState, ScoreBar, StatusBadge } from '@/components/common'
 import { Badge, Button, Card, Skeleton } from '@/components/ui'
 import { scoreColor } from '@/lib/format'
+import { cn } from '@/lib/utils'
+import { latestPitchDraft } from './pitches'
 import { ProspectBandBadge } from './prospects'
 
 function InfoItem({ label, children }: { label: string; children: React.ReactNode }) {
@@ -23,6 +36,151 @@ function InfoItem({ label, children }: { label: string; children: React.ReactNod
   )
 }
 
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="font-mono text-[10px] font-semibold tracking-[0.25em] text-[var(--color-muted)]">
+      {children}
+    </h2>
+  )
+}
+
+/* ─── THE PLAN (compact summary of planer 05 offer ladder + 07 master plan) ── */
+
+type PlanStepId = 'discovery' | 'pitch' | 'pilot' | 'retainer'
+
+const PLAN_STEPS: Array<{ id: PlanStepId; label: string; hint: string }> = [
+  {
+    id: 'discovery',
+    label: 'DISCOVERY',
+    hint: 'Free workflow mapping — find the one workflow worth automating.',
+  },
+  {
+    id: 'pitch',
+    label: 'PITCH',
+    hint: 'Teaser proposal — Web Care wedge first (RM3–4k/mo).',
+  },
+  {
+    id: 'pilot',
+    label: 'PILOT',
+    hint: '4-week single-workflow pilot with a before/after metric.',
+  },
+  {
+    id: 'retainer',
+    label: 'RETAINER',
+    hint: 'Web care + agent on a monthly retainer (RM5–8k/mo).',
+  },
+]
+
+/** Pipeline status → plan step. Values mirror BUSINESS_STATUSES (shared schemas). */
+const STEP_BY_STATUS: Record<string, PlanStepId> = {
+  DISCOVERED_BUSINESS: 'discovery',
+  BUSINESS_ANALYZED: 'discovery',
+  PROBLEM_IDENTIFIED: 'discovery',
+  OPPORTUNITY: 'discovery',
+  OUTREACH: 'discovery',
+  REPLIED: 'discovery',
+  MEETING: 'discovery',
+  TEASER_PROPOSAL: 'pitch',
+  PROPOSAL: 'pitch',
+  // No PILOT status exists yet — Pilot renders as upcoming, never fabricated.
+  WON: 'retainer',
+}
+const CLOSED_STATUSES = new Set(['LOST', 'NOT_SUITABLE', 'DISMISSED'])
+
+function PlanSteps({ status, draft }: { status: string | null; draft: GateAction | null }) {
+  const current = status ? (STEP_BY_STATUS[status] ?? null) : null
+  const closed = status != null && CLOSED_STATUSES.has(status)
+  const currentIndex = current ? PLAN_STEPS.findIndex((s) => s.id === current) : -1
+
+  return (
+    <div className="flex flex-col gap-2 px-4 py-3.5">
+      <ol className="flex flex-col">
+        {PLAN_STEPS.map((step, i) => {
+          const done = !closed && currentIndex > i
+          const active = !closed && currentIndex === i
+          return (
+            <li key={step.id} className="relative flex gap-3 pb-4 last:pb-0">
+              {i < PLAN_STEPS.length - 1 && (
+                <span
+                  aria-hidden
+                  className={cn(
+                    'absolute left-[7px] top-5 h-[calc(100%-1.4rem)] w-px',
+                    done ? 'bg-emerald-400/40' : 'bg-[var(--color-border)]',
+                  )}
+                />
+              )}
+              <span
+                className={cn(
+                  'mt-1 flex size-4 shrink-0 items-center justify-center rounded-full border',
+                  active && 'border-[var(--color-accent)] bg-[var(--color-accent)]/20',
+                  done && 'border-emerald-400/60 bg-emerald-400/15',
+                  !active && !done && 'border-[var(--color-border)]',
+                )}
+              >
+                {done && <Check className="size-2.5 text-emerald-300" />}
+                {active && <span className="size-1.5 rounded-full bg-[var(--color-accent)]" />}
+              </span>
+              <div
+                className={cn(
+                  'min-w-0 flex-1 rounded-md px-2.5 py-1.5',
+                  active && 'border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/[0.06]',
+                )}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={cn(
+                      'font-mono text-[11px] font-semibold tracking-[0.18em]',
+                      active
+                        ? 'text-[var(--color-accent)]'
+                        : done
+                          ? 'text-[var(--color-text)]/80'
+                          : 'text-[var(--color-muted)]',
+                    )}
+                  >
+                    {step.label}
+                  </span>
+                  {active && (
+                    <span className="font-mono text-[9px] tracking-[0.2em] text-[var(--color-accent)]/80">
+                      ◂ CURRENT
+                    </span>
+                  )}
+                  {step.id === 'pitch' && draft && (
+                    <Link
+                      to="/gate"
+                      title="Pitch draft in the Action Gate"
+                      className="inline-flex items-center gap-1.5"
+                    >
+                      <StatusBadge status={draft.status} />
+                      <span className="font-mono text-[9px] tracking-[0.2em] text-[var(--color-muted)]">
+                        DRAFT
+                      </span>
+                    </Link>
+                  )}
+                </div>
+                <p
+                  className={cn(
+                    'mt-0.5 text-xs leading-5',
+                    active ? 'text-[var(--color-text)]/85' : 'text-[var(--color-muted)]',
+                  )}
+                >
+                  {step.hint}
+                </p>
+              </div>
+            </li>
+          )
+        })}
+      </ol>
+      {closed && (
+        <p className="font-mono text-[10px] tracking-[0.2em] text-red-300/80">
+          PIPELINE CLOSED — {status}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/* ─── Page ─────────────────────────────────────────────────────────────────── */
+
 export function ProspectDetailPage() {
   const { id } = useParams<{ id: string }>()
 
@@ -31,6 +189,18 @@ export function ProspectDetailPage() {
     queryFn: () => getOpportunity(id!),
     enabled: id != null,
   })
+
+  // The prepare_pitch draft for this prospect, if one sits in the gate.
+  // Same query family as /gate + /pitches so invalidations stay shared.
+  const { data: gateData } = useQuery({
+    queryKey: ['gate-actions', { status: undefined }],
+    queryFn: () => listGateActions({ limit: 100 }),
+    enabled: id != null,
+  })
+  const pitchDraft = useMemo(
+    () => (id ? latestPitchDraft(gateData?.items ?? [], id) : null),
+    [gateData, id],
+  )
 
   if (!id) {
     return <EmptyState title="Missing prospect id" hint="Navigate from the prospects table." />
@@ -115,26 +285,29 @@ export function ProspectDetailPage() {
         </div>
       </div>
 
-      {/* Pitch payload */}
+      {/* Company + pitch payload facts */}
       <Card className="grid grid-cols-1 gap-x-6 divide-y divide-[var(--color-border)]/60 sm:grid-cols-2 sm:divide-y-0">
         <div className="divide-y divide-[var(--color-border)]/60">
           <InfoItem label="SEGMENT">{d.segment ?? '—'}</InfoItem>
-          <InfoItem label="AGENTIC FIT">
-            <span className="font-mono tabular-nums">{d.agentic_fit ?? '—'}</span>
-          </InfoItem>
-          <InfoItem label="SUB-SCORES">
-            {d.sub_scores ? (
-              <span className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs tabular-nums">
-                {Object.entries(d.sub_scores).map(([k, v]) => (
-                  <span key={k}>
-                    <span className="text-[var(--color-muted)]">{k.replace(/_/g, ' ')}</span> {v ?? '—'}
-                  </span>
-                ))}
-              </span>
+          <InfoItem label="COMPANY">
+            {company ? (
+              <Link
+                to={`/companies/${company.id}`}
+                className="inline-flex items-center gap-1 text-[var(--color-accent)] underline decoration-[var(--color-accent)]/30 underline-offset-2 hover:decoration-[var(--color-accent)]"
+              >
+                <Building2 className="size-3 shrink-0" />
+                {company.name ?? (d.company as string | undefined) ?? '—'}
+              </Link>
             ) : (
-              '—'
+              ((d.company as string | undefined) ?? '—')
+            )}
+            {company?.data.industry && (
+              <span className="mt-0.5 block text-xs text-[var(--color-muted)]">
+                {[company.data.industry, company.data.size].filter(Boolean).join(' · ')}
+              </span>
             )}
           </InfoItem>
+          <InfoItem label="LOCATION">{company?.data.location ?? '—'}</InfoItem>
         </div>
         <div className="divide-y divide-[var(--color-border)]/60">
           <InfoItem label="SOURCE">
@@ -171,24 +344,60 @@ export function ProspectDetailPage() {
         </div>
       </Card>
 
-      {/* Fit reason */}
-      <div className="flex flex-col gap-2">
-        <h2 className="font-mono text-[10px] font-semibold tracking-[0.25em] text-[var(--color-muted)]">
-          WHY THIS PROSPECT
-        </h2>
-        <Card className="px-4 py-3 text-sm leading-6 text-[var(--color-text)]/90">
-          {d.fit_reason ?? 'No fit reason recorded.'}
-        </Card>
+      {/* Evidence + numbers */}
+      <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <SectionHeading>PROBLEMS DETECTED</SectionHeading>
+            <Card className="px-4 py-3">
+              {d.problems_detected?.length ? (
+                <ul className="flex flex-col gap-1.5">
+                  {d.problems_detected.map((p, i) => (
+                    <li
+                      key={i}
+                      className="flex items-start gap-2 text-sm leading-6 text-[var(--color-text)]/90"
+                    >
+                      <span
+                        aria-hidden
+                        className="mt-2.5 size-1 shrink-0 rounded-full bg-[var(--color-accent)]"
+                      />
+                      {p}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-[var(--color-muted)]">No problems recorded.</p>
+              )}
+            </Card>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <SectionHeading>WHY THIS PROSPECT</SectionHeading>
+            <Card className="px-4 py-3 text-sm leading-6 text-[var(--color-text)]/90">
+              {d.fit_reason ?? 'No fit reason recorded.'}
+            </Card>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <SectionHeading>SCORE BREAKDOWN</SectionHeading>
+          <Card className="flex flex-col gap-3 px-4 py-3.5">
+            <ScoreBar label="Agentic fit" value={d.agentic_fit} />
+            <ScoreBar label="Problem severity" value={d.sub_scores?.problem_severity} />
+            <ScoreBar label="Budget hint" value={d.sub_scores?.budget_hint} />
+            <ScoreBar label="Reachability" value={d.sub_scores?.reachability} />
+            <ScoreBar label="Fit" value={d.sub_scores?.fit} />
+          </Card>
+        </div>
       </div>
 
-      <Card
-        className="flex items-center gap-2 border-[var(--color-accent)]/30 bg-[var(--color-accent)]/[0.04] px-4 py-3"
-      >
-        <Sparkles className="size-3.5 shrink-0 text-[var(--color-accent)]" />
-        <p className="text-xs text-[var(--color-muted)]">
-          Pitch workspace — teaser drafting, outreach preparation, reply tracking — lands here in EYE-7.
-        </p>
-      </Card>
+      {/* THE PLAN */}
+      <div className="flex flex-col gap-2">
+        <SectionHeading>THE PLAN</SectionHeading>
+        <Card className="overflow-hidden">
+          <PlanSteps status={opp.status} draft={pitchDraft} />
+        </Card>
+      </div>
     </div>
   )
 }
