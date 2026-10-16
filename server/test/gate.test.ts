@@ -51,6 +51,30 @@ async function submitGateAction(opportunityId: string, payload: Record<string, u
   return json(res);
 }
 
+/** A business prospect (CONSULTANCY) — the pitch-flow target. */
+async function createProspect(company = 'PitchWorks Sdn Bhd'): Promise<string> {
+  const res = await app.request('/api/opportunities', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ opportunity_type: 'CONSULTANCY', data: { company } }),
+  });
+  expect(res.status).toBe(201);
+  return (await json(res))['id'] as string;
+}
+
+async function submitPitchAction(opportunityId: string, payload: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  const res = await app.request('/api/gate/actions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      action_type: 'prepare_pitch',
+      payload: { opportunity_id: opportunityId, ...payload },
+    }),
+  });
+  expect(res.status).toBe(201);
+  return json(res);
+}
+
 describe('Action Gate API (T1.11)', () => {
   it('submit → list pending → approve executes task DONE + opportunity APPLIED with applied_date', async () => {
     const oppId = await createJob();
@@ -178,6 +202,101 @@ describe('Action Gate API (T1.11)', () => {
       body: JSON.stringify({ action_type: 'apply_to_job', payload: { opportunity_id: '01J0000000000000000000000X' } }),
     });
     expect(bad.status).toBe(422);
+  });
+});
+
+describe('Action Gate — prepare_pitch (EYE-6F)', () => {
+  it('submit → PENDING with a pitch summary and no "Apply to" text', async () => {
+    const oppId = await createProspect();
+    const action = await submitPitchAction(oppId);
+    expect(action['status']).toBe('PENDING');
+    expect(action['summary']).toBe('Prepare pitch — PitchWorks Sdn Bhd');
+    expect(JSON.stringify(action)).not.toContain('Apply to');
+
+    const pending = await json(await app.request('/api/gate/actions?status=PENDING'));
+    expect(pending['total']).toBe(1);
+    const pendingItems = pending['items'] as Record<string, unknown>[];
+    expect(pendingItems).toHaveLength(1);
+    const item = pendingItems[0]!;
+    expect(item['summary']).toBe('Prepare pitch — PitchWorks Sdn Bhd');
+    expect(JSON.stringify(item)).not.toContain('Apply to');
+  });
+
+  it('summary resolves the company from the belongs_to COMPANY edge when data.company is absent', async () => {
+    const companies = await json(await app.request('/api/companies'));
+    const company = (companies['items'] as Record<string, unknown>[]).find((c) => c['type'] === 'COMPANY');
+    expect(company).toBeTruthy();
+
+    const res = await app.request('/api/opportunities', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ opportunity_type: 'CONSULTANCY', data: { company_id: company!['id'] } }),
+    });
+    expect(res.status).toBe(201);
+    const oppId = (await json(res))['id'] as string;
+
+    const action = await submitPitchAction(oppId);
+    expect(action['summary']).toBe(`Prepare pitch — ${company!['name']}`);
+  });
+
+  it('approve → TEASER_PROPOSAL + pitch TASK; never APPLIED, no applied_date, no follow_up', async () => {
+    const oppId = await createProspect();
+    const action = await submitPitchAction(oppId, { note: 'Lean on the KL case study' });
+
+    const approveRes = await app.request(`/api/gate/actions/${action['id']}/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(approveRes.status).toBe(200);
+    const decided = await json(approveRes);
+    expect(decided['status']).toBe('APPROVED');
+
+    const opp = decided['opportunity'] as Record<string, unknown>;
+    expect(opp['status']).toBe('TEASER_PROPOSAL');
+    expect(opp['status']).not.toBe('APPLIED');
+    const oppData = opp['data'] as Record<string, unknown>;
+    expect(oppData['applied_date']).toBeUndefined();
+    expect(oppData['next_action']).toBeUndefined();
+
+    const task = decided['task'] as Record<string, unknown>;
+    expect(task['name']).toBe('Prepare pitch — PitchWorks Sdn Bhd');
+    expect(task['status']).toBe('DONE');
+    expect(task['tags']).toEqual(['gate', 'pitch']);
+    expect((task['data'] as Record<string, unknown>)['description']).toContain('KL case study');
+
+    // status_changed records the real from → to (created at DISCOVERED_BUSINESS).
+    const events = await json(await app.request(`/api/opportunities/${oppId}/events`));
+    const statusEvents = (events['items'] as Record<string, unknown>[]).filter((e) => e['type'] === 'status_changed');
+    expect(statusEvents).toHaveLength(1);
+    expect(String(statusEvents[0]!['summary'])).toContain('DISCOVERED_BUSINESS → TEASER_PROPOSAL');
+  });
+
+  it('reject leaves the opportunity untouched — no status change, no task', async () => {
+    const oppId = await createProspect();
+    const action = await submitPitchAction(oppId);
+    const res = await app.request(`/api/gate/actions/${action['id']}/reject`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reason: 'Not this quarter' }),
+    });
+    expect(res.status).toBe(200);
+
+    const opp = await json(await app.request(`/api/opportunities/${oppId}`));
+    expect(opp['status']).toBe('DISCOVERED_BUSINESS'); // untouched
+    expect((opp['data'] as Record<string, unknown>)['applied_date']).toBeUndefined();
+
+    const tasks = await json(await app.request('/api/tasks'));
+    expect(tasks['total']).toBe(0);
+  });
+
+  it('unknown action_type is rejected with 422', async () => {
+    const res = await app.request('/api/gate/actions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action_type: 'cold_call', payload: { opportunity_id: '01J0000000000000000000000X' } }),
+    });
+    expect(res.status).toBe(422);
   });
 });
 

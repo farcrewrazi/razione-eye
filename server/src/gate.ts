@@ -10,6 +10,10 @@
  *   • the JOB opportunity transitions → APPLIED with data.applied_date = today
  *   • `status_changed` + task events are recorded alongside the `gate_decision` event
  *
+ * EYE-6F adds a second flow, `prepare_pitch`: same gate mechanics, pitch
+ * semantics on approve — a "Prepare pitch — <company>" TASK (tags gate,pitch)
+ * and the opportunity → TEASER_PROPOSAL. Never APPLIED, never applied_date.
+ *
  * v0.x reality (doc 03 §4): "execute" means the system hands Razi a ready-to-paste
  * kit and marks it done on confirm — no auto-apply exists, by design.
  */
@@ -20,15 +24,19 @@ import {
   bandForScore,
   createGateActionSchema,
   gateStatusSchema,
+  preparePitchPayloadSchema,
   rejectGateActionSchema,
   updateGateActionSchema,
   type ApplyToJobPayload,
   type GateAction,
+  type GateActionType,
   type Node,
+  type PreparePitchPayload,
 } from '@razione-eye/shared';
 import { getCtx, err } from './http-util.ts';
 import type { AppContext } from './context.ts';
 import { nowIso } from './ulid.ts';
+import { linkedCompany } from './dashboard.ts';
 
 /** Enrich a gate row with its linked nodes for the review screen. */
 async function withLinks(ctx: AppContext, action: GateAction): Promise<GateAction> {
@@ -41,7 +49,44 @@ async function withLinks(ctx: AppContext, action: GateAction): Promise<GateActio
   };
 }
 
-function summaryFor(payload: ApplyToJobPayload, opportunity: Node | null): string {
+/** Payload schema per action type — an unknown type never falls through to the apply schema. */
+function payloadSchemaFor(actionType: GateActionType) {
+  switch (actionType) {
+    case 'apply_to_job':
+      return applyToJobPayloadSchema;
+    case 'prepare_pitch':
+      return preparePitchPayloadSchema;
+    default: {
+      actionType satisfies never; // a new GATE_ACTION_TYPES member must add a case here
+      return null;
+    }
+  }
+}
+
+/** Pitch target company: linked COMPANY node (belongs_to) → data.company → node name. */
+async function pitchCompanyFor(ctx: AppContext, opportunity: Node): Promise<string | null> {
+  const linked = await linkedCompany(ctx, opportunity);
+  const dataCompany = opportunity.data['company'];
+  const fallback = typeof dataCompany === 'string' && dataCompany.trim() !== '' ? dataCompany.trim() : null;
+  return linked?.name ?? fallback ?? opportunity.name ?? null;
+}
+
+/** task_id is optional on both payload shapes (pitch drafts usually carry none). */
+function payloadTaskId(payload: ApplyToJobPayload | PreparePitchPayload): string | undefined {
+  const v = (payload as { task_id?: unknown }).task_id;
+  return typeof v === 'string' ? v : undefined;
+}
+
+async function summaryFor(
+  ctx: AppContext,
+  actionType: GateActionType,
+  payload: ApplyToJobPayload | PreparePitchPayload,
+  opportunity: Node | null,
+): Promise<string> {
+  if (actionType === 'prepare_pitch') {
+    const company = opportunity ? await pitchCompanyFor(ctx, opportunity) : null;
+    return `Prepare pitch — ${company ?? payload.opportunity_id ?? 'opportunity'}`;
+  }
   const role = opportunity ? ((opportunity.data['role'] as string | undefined) ?? opportunity.name) : null;
   const company = opportunity ? (opportunity.data['company'] as string | undefined) : null;
   const target = [role, company].filter((s) => typeof s === 'string' && s.trim() !== '').join(' — ');
@@ -75,8 +120,12 @@ export const gateRoute = new Hono()
     }
     const input = parsed.data;
 
-    // Validate the payload for the action type (v1: apply_to_job only).
-    const payloadParsed = applyToJobPayloadSchema.safeParse(input.payload);
+    // Validate the payload with the schema for this action type (pitch ≠ apply).
+    const payloadSchema = payloadSchemaFor(input.action_type);
+    if (!payloadSchema) {
+      return err(c, 422, 'VALIDATION', `unknown action_type: ${String(input.action_type)}`);
+    }
+    const payloadParsed = payloadSchema.safeParse(input.payload);
     if (!payloadParsed.success) {
       return err(c, 422, 'VALIDATION', payloadParsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
@@ -89,7 +138,7 @@ export const gateRoute = new Hono()
       return err(c, 422, 'VALIDATION', `opportunity_id ${opportunityId} does not reference an OPPORTUNITY node`);
     }
 
-    const taskId = payload.task_id ?? input.task_id ?? null;
+    const taskId = payloadTaskId(payload) ?? input.task_id ?? null;
     if (taskId) {
       const task = await ctx.nodes.getById(taskId);
       if (!task || task.type !== 'TASK') {
@@ -102,7 +151,7 @@ export const gateRoute = new Hono()
       opportunity_id: opportunityId,
       task_id: taskId,
       payload: { ...payload, opportunity_id: opportunityId, ...(taskId ? { task_id: taskId } : {}) },
-      summary: summaryFor(payload, opportunity),
+      summary: await summaryFor(ctx, input.action_type, payload, opportunity),
     });
     return c.json(await withLinks(ctx, action), 201);
   })
@@ -126,7 +175,11 @@ export const gateRoute = new Hono()
     if (!parsed.success) {
       return err(c, 422, 'VALIDATION', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
-    const payloadParsed = applyToJobPayloadSchema.safeParse({ ...action.payload, ...parsed.data.payload });
+    const payloadSchema = payloadSchemaFor(action.action_type);
+    if (!payloadSchema) {
+      return err(c, 422, 'VALIDATION', `unknown action_type: ${String(action.action_type)}`);
+    }
+    const payloadParsed = payloadSchema.safeParse({ ...action.payload, ...parsed.data.payload });
     if (!payloadParsed.success) {
       return err(c, 422, 'VALIDATION', payloadParsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
@@ -150,7 +203,11 @@ export const gateRoute = new Hono()
     // Edit-then-approve: an inline payload replaces the draft before execution.
     const edited = parsed.data.payload !== undefined;
     const mergedPayloadRaw = edited ? { ...action.payload, ...parsed.data.payload } : action.payload;
-    const payloadParsed = applyToJobPayloadSchema.safeParse(mergedPayloadRaw);
+    const payloadSchema = payloadSchemaFor(action.action_type);
+    if (!payloadSchema) {
+      return err(c, 422, 'VALIDATION', `unknown action_type: ${String(action.action_type)}`);
+    }
+    const payloadParsed = payloadSchema.safeParse(mergedPayloadRaw);
     if (!payloadParsed.success) {
       return err(c, 422, 'VALIDATION', payloadParsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
     }
@@ -163,57 +220,119 @@ export const gateRoute = new Hono()
       return err(c, 422, 'VALIDATION', 'linked opportunity no longer exists');
     }
 
-    // ── Execute the apply-task flow ──────────────────────────────────────────
+    // ── Execute, per action type (pitch ≠ apply) ─────────────────────────────
     const now = nowIso();
     const today = now.slice(0, 10);
-    const role = (opportunity.data['role'] as string | undefined) ?? opportunity.name ?? 'role';
+    let task: Node | null;
+    let updatedOpp: Node;
 
-    // 1. Ensure the apply TASK exists and is DONE.
-    let task = action.task_id ? await ctx.nodes.getById(action.task_id) : null;
-    if (!task) {
-      task = await ctx.nodes.create({
-        type: 'TASK',
-        name: `Apply to ${role}`,
-        status: 'DONE',
-        source: 'gate',
-        tags: ['gate', 'apply'],
-        data: {
-          title: `Apply to ${role}`,
-          description: 'Prepared and approved through the Action Gate',
-          opportunity_id: opportunity.id,
-          priority: 'HIGH',
-          completed_at: now,
-        },
-      });
-      await ctx.edges.ensure(task.id, opportunity.id, 'serves');
+    if (action.action_type === 'prepare_pitch') {
+      const pitch = payload as PreparePitchPayload; // payloadSchemaFor picked the pitch schema above
+      const company = (await pitchCompanyFor(ctx, opportunity)) ?? opportunity.id;
+
+      // 1. Ensure the pitch TASK exists and is DONE.
+      const existingTask = action.task_id ? await ctx.nodes.getById(action.task_id) : null;
+      if (existingTask) {
+        task = (await ctx.nodes.update(existingTask.id, {
+          status: 'DONE',
+          data: { ...(existingTask.data as Record<string, unknown>), completed_at: now },
+        }))!;
+      } else {
+        task = await ctx.nodes.create({
+          type: 'TASK',
+          name: `Prepare pitch — ${company}`,
+          status: 'DONE',
+          source: 'gate',
+          tags: ['gate', 'pitch'],
+          data: {
+            title: `Prepare pitch — ${company}`,
+            description: pitch.note
+              ? `Prepared and approved through the Action Gate — ${pitch.note}`
+              : 'Prepared and approved through the Action Gate',
+            opportunity_id: opportunity.id,
+            priority: 'HIGH',
+            completed_at: now,
+          },
+        });
+        await ctx.edges.ensure(task.id, opportunity.id, 'serves');
+      }
+
+      // 2. Opportunity → TEASER_PROPOSAL. NEVER APPLIED, never applied_date, no
+      //    follow_up next_action. Stages already at/past the teaser and terminals
+      //    stay untouched — no downgrade, no revival.
+      const PITCH_SETTLED = new Set([
+        'TEASER_PROPOSAL',
+        'OUTREACH',
+        'REPLIED',
+        'MEETING',
+        'PROPOSAL',
+        'WON',
+        'LOST',
+        'NOT_SUITABLE',
+        'DISMISSED',
+      ]);
+      const previousStatus = opportunity.status;
+      updatedOpp = opportunity;
+      if (!PITCH_SETTLED.has(previousStatus ?? '')) {
+        updatedOpp = (await ctx.nodes.update(opportunity.id, { status: 'TEASER_PROPOSAL' }))!;
+        await ctx.events.record({
+          type: 'status_changed',
+          node_id: opportunity.id,
+          summary: `"${opportunity.name ?? opportunity.id}": ${previousStatus} → TEASER_PROPOSAL (Action Gate)`,
+          data: { from: previousStatus, to: 'TEASER_PROPOSAL', gate_action_id: action.id },
+        });
+      }
     } else {
-      task = (await ctx.nodes.update(task.id, {
-        status: 'DONE',
-        data: { ...(task.data as Record<string, unknown>), completed_at: now },
-      }))!;
-    }
+      // Apply-task flow (unchanged apply_to_job semantics).
+      const role = (opportunity.data['role'] as string | undefined) ?? opportunity.name ?? 'role';
 
-    // 2. Opportunity → APPLIED with applied_date (terminals stay untouched).
-    const TERMINAL = new Set(['REJECTED', 'IGNORED', 'NOT_SUITABLE', 'EXPIRED', 'HIRED']);
-    const previousStatus = opportunity.status;
-    let updatedOpp = opportunity;
-    if (!TERMINAL.has(previousStatus ?? '') && previousStatus !== 'APPLIED') {
-      updatedOpp = (await ctx.nodes.update(opportunity.id, {
-        status: 'APPLIED',
-        data: {
-          ...opportunity.data,
-          applied_date: today,
-          next_action: { type: 'follow_up', due: isoDaysFromNow(7) },
-        },
-      }))!;
-      await ctx.events.record({
-        type: 'status_changed',
-        node_id: opportunity.id,
-        summary: `"${opportunity.name ?? opportunity.id}": ${previousStatus} → APPLIED (Action Gate)`,
-        data: { from: previousStatus, to: 'APPLIED', gate_action_id: action.id, applied_date: today },
-      });
-    } else if (previousStatus === 'APPLIED' && opportunity.data['applied_date'] === undefined) {
-      updatedOpp = (await ctx.nodes.update(opportunity.id, { data: { ...opportunity.data, applied_date: today } }))!;
+      // 1. Ensure the apply TASK exists and is DONE.
+      task = action.task_id ? await ctx.nodes.getById(action.task_id) : null;
+      if (!task) {
+        task = await ctx.nodes.create({
+          type: 'TASK',
+          name: `Apply to ${role}`,
+          status: 'DONE',
+          source: 'gate',
+          tags: ['gate', 'apply'],
+          data: {
+            title: `Apply to ${role}`,
+            description: 'Prepared and approved through the Action Gate',
+            opportunity_id: opportunity.id,
+            priority: 'HIGH',
+            completed_at: now,
+          },
+        });
+        await ctx.edges.ensure(task.id, opportunity.id, 'serves');
+      } else {
+        task = (await ctx.nodes.update(task.id, {
+          status: 'DONE',
+          data: { ...(task.data as Record<string, unknown>), completed_at: now },
+        }))!;
+      }
+
+      // 2. Opportunity → APPLIED with applied_date (terminals stay untouched).
+      const TERMINAL = new Set(['REJECTED', 'IGNORED', 'NOT_SUITABLE', 'EXPIRED', 'HIRED']);
+      const previousStatus = opportunity.status;
+      updatedOpp = opportunity;
+      if (!TERMINAL.has(previousStatus ?? '') && previousStatus !== 'APPLIED') {
+        updatedOpp = (await ctx.nodes.update(opportunity.id, {
+          status: 'APPLIED',
+          data: {
+            ...opportunity.data,
+            applied_date: today,
+            next_action: { type: 'follow_up', due: isoDaysFromNow(7) },
+          },
+        }))!;
+        await ctx.events.record({
+          type: 'status_changed',
+          node_id: opportunity.id,
+          summary: `"${opportunity.name ?? opportunity.id}": ${previousStatus} → APPLIED (Action Gate)`,
+          data: { from: previousStatus, to: 'APPLIED', gate_action_id: action.id, applied_date: today },
+        });
+      } else if (previousStatus === 'APPLIED' && opportunity.data['applied_date'] === undefined) {
+        updatedOpp = (await ctx.nodes.update(opportunity.id, { data: { ...opportunity.data, applied_date: today } }))!;
+      }
     }
 
     // 3. Stamp the decision + log it.

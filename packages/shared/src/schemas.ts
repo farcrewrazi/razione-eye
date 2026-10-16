@@ -667,8 +667,8 @@ export const appendNoteSchema = z
 // action → it sits PENDING on the dashboard → Razi Approves / Edit-then-approves
 // / Rejects → only then does the status update execute. Every decision is logged.
 
-/** Action types that require explicit Razi approval (v1: the apply-task flow). */
-export const GATE_ACTION_TYPES = ['apply_to_job'] as const;
+/** Action types that require explicit Razi approval (apply-task flow + pitch flow). */
+export const GATE_ACTION_TYPES = ['apply_to_job', 'prepare_pitch'] as const;
 export const gateActionTypeSchema = z.enum(GATE_ACTION_TYPES);
 
 export const GATE_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
@@ -686,6 +686,18 @@ export const applyToJobPayloadSchema = z
     resume_version: z.string().optional(),
     apply_url: z.string().url().optional(),
     notes: z.string().optional(),
+  })
+  .passthrough();
+
+/**
+ * The prepared draft payload for `prepare_pitch` (EYE-6F) — pitch a business
+ * prospect. Approving moves the opportunity to TEASER_PROPOSAL; nothing is
+ * ever sent by the gate itself.
+ */
+export const preparePitchPayloadSchema = z
+  .object({
+    opportunity_id: ulidSchema,
+    note: z.string().optional(),
   })
   .passthrough();
 
@@ -813,6 +825,7 @@ export type GateActionType = z.infer<typeof gateActionTypeSchema>;
 export type GateStatus = z.infer<typeof gateStatusSchema>;
 export type GateDecision = z.infer<typeof gateDecisionSchema>;
 export type ApplyToJobPayload = z.infer<typeof applyToJobPayloadSchema>;
+export type PreparePitchPayload = z.infer<typeof preparePitchPayloadSchema>;
 export type CreateGateAction = z.infer<typeof createGateActionSchema>;
 export type UpdateGateAction = z.infer<typeof updateGateActionSchema>;
 export type ApproveGateAction = z.infer<typeof approveGateActionSchema>;

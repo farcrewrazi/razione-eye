@@ -40,6 +40,7 @@ import type {
   EveningBrief,
   Event,
   GateAction,
+  GateActionType,
   Health,
   ListCompaniesParams,
   ListEventsParams,
@@ -800,9 +801,15 @@ function enrichGateAction(action: GateAction): GateAction {
   return { ...action, opportunity, task }
 }
 
-/** "Apply to Senior Backend Engineer — DataHarbor" (mirrors server summaryFor). */
-function gateSummaryFor(opportunityId: string): string {
+/** "Apply to Senior Backend Engineer — DataHarbor" / "Prepare pitch — RaziSurf" (mirrors server summaryFor). */
+function gateSummaryFor(actionType: GateActionType, opportunityId: string): string {
   const o = db.opportunities.find((op) => op.id === opportunityId)
+  if (actionType === 'prepare_pitch') {
+    const company = o
+      ? (o.company?.name ?? (o.data.company as string | undefined) ?? o.name ?? opportunityId)
+      : opportunityId
+    return `Prepare pitch — ${company}`
+  }
   const role = o ? ((o.data.role as string | undefined) ?? o.name) : null
   const company = o ? (o.company?.name ?? (o.data.company as string | undefined)) : null
   const target = [role, company].filter((s) => typeof s === 'string' && s.trim() !== '').join(' — ')
@@ -850,7 +857,7 @@ export async function createGateAction(input: CreateGateActionInput): Promise<Ga
     opportunity_id: opportunityId,
     task_id: taskId ?? null,
     payload: { ...input.payload, opportunity_id: opportunityId, ...(taskId ? { task_id: taskId } : {}) },
-    summary: gateSummaryFor(opportunityId),
+    summary: gateSummaryFor(input.action_type, opportunityId),
     created_at: now,
     decided_at: null,
     decision: null,
