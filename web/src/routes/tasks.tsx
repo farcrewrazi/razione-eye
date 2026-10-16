@@ -334,24 +334,19 @@ export function TasksPage() {
   })
 
   /*
-   * Eye filter (T1.13): tasks inherit the eye of the opportunity they serve;
-   * unlinked tasks are global and always shown. ALL / CONTROL show everything.
+   * Eye filter (EYE-8): tasks inherit the eye of the opportunity they serve.
+   * Tasks with no resolvable opportunity — unlinked, or a dangling
+   * opportunity_id — stay visible under ALL / CONTROL only. ALL / CONTROL
+   * show everything.
    */
-  const eyeFiltered = focused
-    ? (all?.items ?? []).filter((t) => {
-        const servesId = t.data.opportunity_id
-        if (!servesId) return true
-        return opportunityInEye(opportunityTypes.get(servesId), eye)
-      })
-    : (all?.items ?? [])
-
-  const items = focused
-    ? (data?.items ?? []).filter((t) => {
-        const servesId = t.data.opportunity_id
-        if (!servesId) return true
-        return opportunityInEye(opportunityTypes.get(servesId), eye)
-      })
-    : (data?.items ?? [])
+  const inEye = (t: Task): boolean => {
+    if (!focused) return true
+    const servesId = t.data.opportunity_id
+    if (!servesId || !opportunityTypes.has(servesId)) return eye === 'ALL' || eye === 'CONTROL'
+    return opportunityInEye(opportunityTypes.get(servesId), eye)
+  }
+  const eyeFiltered = focused ? (all?.items ?? []).filter(inEye) : (all?.items ?? [])
+  const items = focused ? (data?.items ?? []).filter(inEye) : (data?.items ?? [])
   const total = data?.total ?? 0
   const openCount = eyeFiltered.filter((t) => t.status === 'TODO' || t.status === 'IN_PROGRESS').length
   const overdueCount = eyeFiltered.filter((t) => isOverdue(t)).length
@@ -363,7 +358,7 @@ export function TasksPage() {
         title="Tasks"
         subtitle={
           focused
-            ? `${def.label} work queue — unlinked tasks stay visible.`
+            ? `${def.label} work queue — tasks serving ${def.shortLabel} opportunities.`
             : 'Work queue derived from pipeline needs.'
         }
         actions={

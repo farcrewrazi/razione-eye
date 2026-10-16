@@ -624,13 +624,13 @@ export function GatePage() {
   })
 
   /*
-   * Eye filter (T1.13): actions inherit the eye of their linked opportunity;
-   * actions without a resolvable opportunity stay visible (global ops items).
-   * Tab counts stay global so pending work in other eyes is never lost.
+   * Eye filter (EYE-8): actions inherit the eye of their linked opportunity.
+   * Actions with no resolvable opportunity stay visible under ALL / CONTROL
+   * only. Tab counts stay global so pending work in other eyes is never lost.
    */
   const inEye = (a: GateAction): boolean => {
     if (!focused) return true
-    if (!a.opportunity) return true
+    if (!a.opportunity) return eye === 'ALL' || eye === 'CONTROL'
     return opportunityInEye(a.opportunity.opportunity_type, eye)
   }
   const items = (data?.items ?? []).filter(inEye)

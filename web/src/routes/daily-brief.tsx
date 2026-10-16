@@ -8,6 +8,9 @@
  * Morning: "RAZIONE DAILY" header, ranked numbered priorities (explicit
  * opportunity refs → direct links), gate-pending count chip → /gate, counts
  * row, compact Next Best Action card.
+ * Eye-scoped (EYE-8): under a focused eye the priorities / NBA show only that
+ * eye's opportunities, and the career count chips hide outside Career; ALL and
+ * CONTROL see the full brief.
  * Evening: "DAILY REVIEW" — completed/pending/new stat chips + observation
  * card (accent border) with the paired recommendation line.
  * Both slots render EmptyState when the brief errors.
@@ -17,11 +20,12 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { AlertTriangle, ArrowRight, Bot, ListChecks, Moon, Sparkles, Sunrise } from 'lucide-react'
-import { getEveningBrief, getMorningBrief, listAgents } from '@/api/provider'
+import { getEveningBrief, getMorningBrief, listAgents, listOpportunities } from '@/api/provider'
 import type { Agent, EveningBrief, MorningBrief, NextBestAction } from '@/api/types'
 import { AgentStatusDot, BandBadge, EmptyState, PageHeader, StatusBadge } from '@/components/common'
 import { Badge, Button, Card, Skeleton } from '@/components/ui'
 import { useEyeFocus } from '@/hooks/useEyeFocus'
+import { opportunityInEye } from '@/lib/eyes'
 import { dueMeta, timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -73,15 +77,12 @@ function CountChip({
   value,
   tone,
   to,
-  dim = false,
 }: {
   label: string
   value: number
   tone: 'green' | 'sky' | 'amber' | 'red' | 'slate'
   /** Optional route — the chip becomes a link (e.g. gate pending → /gate). */
   to?: string
-  /** Not the focused eye — the chip stays visible but recedes (T1.13). */
-  dim?: boolean
 }) {
   const tones = {
     green: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
@@ -93,7 +94,7 @@ function CountChip({
   const chip = (
     <Badge
       variant="outline"
-      className={cn('px-2.5 py-1 font-mono text-[11px] tracking-wider transition-opacity', tones[tone], dim && 'opacity-40')}
+      className={cn('px-2.5 py-1 font-mono text-[11px] tracking-wider', tones[tone])}
     >
       <span className="font-semibold tabular-nums">{value}</span>&nbsp;{label}
     </Badge>
@@ -173,11 +174,36 @@ function PriorityRow({
 /* ─── Morning ───────────────────────────────────────────────────────────────── */
 
 function MorningView({ brief }: { brief: MorningBrief }) {
-  const { eye } = useEyeFocus()
-  const nba: NextBestAction | null = brief.next_best_action?.opportunity ? brief.next_best_action : null
+  const { eye, def, focused } = useEyeFocus()
   const c = brief.counts
-  // Dim eye-tagged chips that aren't the focus — the brief stays global (T1.13).
-  const dimCareer = eye !== 'ALL' && eye !== 'CONTROL' && eye !== 'CAREER'
+
+  // Priorities carry only opportunity_id — resolve each id to its
+  // opportunity_type to place it in an eye (same pass as Tasks, EYE-8).
+  const { data: opportunitiesData } = useQuery({
+    queryKey: ['opportunities', { chips: 'brief-eye' }],
+    queryFn: () => listOpportunities({ limit: 200 }),
+    staleTime: 60_000,
+  })
+  const opportunityTypes = new Map(
+    (opportunitiesData?.items ?? []).map((o) => [o.id, o.opportunity_type]),
+  )
+
+  // Eye filter (EYE-8): priorities / NBA inherit the eye of their opportunity;
+  // rows with no resolvable opportunity stay visible under ALL / CONTROL only.
+  const priorities = focused
+    ? brief.priorities.filter((p) => {
+        const type = opportunityTypes.get(p.opportunity_id)
+        if (type === undefined) return eye === 'ALL' || eye === 'CONTROL'
+        return opportunityInEye(type, eye)
+      })
+    : brief.priorities
+  const nba: NextBestAction | null =
+    brief.next_best_action?.opportunity &&
+    (!focused || opportunityInEye(brief.next_best_action.opportunity.opportunity_type, eye))
+      ? brief.next_best_action
+      : null
+  // Career chips are Career Eye items; ALL / CONTROL see the full counts row.
+  const showCareer = eye === 'ALL' || eye === 'CONTROL' || eye === 'CAREER'
 
   return (
     <div className="flex flex-col gap-4">
@@ -199,7 +225,8 @@ function MorningView({ brief }: { brief: MorningBrief }) {
         </div>
       </Card>
 
-      {/* Counts row */}
+      {/* Counts row — global ops counters stay in every eye; career chips are
+          Career Eye items and hide under other focused eyes (EYE-8). */}
       <div className="flex flex-wrap items-center gap-2">
         <CountChip label="ACTIONS REQUIRED" value={c.actions_required} tone={c.actions_required > 0 ? 'amber' : 'green'} />
         <CountChip
@@ -209,22 +236,30 @@ function MorningView({ brief }: { brief: MorningBrief }) {
           to="/gate"
         />
         <CountChip label="OVERDUE TASKS" value={c.overdue_tasks} tone={c.overdue_tasks > 0 ? 'red' : 'slate'} />
-        <CountChip label="NEW JOBS" value={c.career.new_jobs} tone="green" dim={dimCareer} />
-        <CountChip label="HIGH-MATCH" value={c.career.high_match} tone="green" dim={dimCareer} />
-        <CountChip label="APPLICATIONS PENDING" value={c.career.pending_applications} tone="sky" dim={dimCareer} />
-        <CountChip label="RECRUITERS AWAITING" value={c.career.recruiters_awaiting} tone="sky" dim={dimCareer} />
+        {showCareer && (
+          <>
+            <CountChip label="NEW JOBS" value={c.career.new_jobs} tone="green" />
+            <CountChip label="HIGH-MATCH" value={c.career.high_match} tone="green" />
+            <CountChip label="APPLICATIONS PENDING" value={c.career.pending_applications} tone="sky" />
+            <CountChip label="RECRUITERS AWAITING" value={c.career.recruiters_awaiting} tone="sky" />
+          </>
+        )}
       </div>
 
       {/* Priorities */}
-      {brief.priorities.length === 0 ? (
+      {priorities.length === 0 ? (
         <EmptyState
           icon={<ListChecks />}
-          title="No priorities"
-          hint="Nothing ranked for today — the pipeline is clear."
+          title={focused ? `No ${def.shortLabel} Eye priorities` : 'No priorities'}
+          hint={
+            focused
+              ? `Nothing ranked for ${def.label} today — reset the focus to All for the full ranking.`
+              : 'Nothing ranked for today — the pipeline is clear.'
+          }
         />
       ) : (
         <Card className="divide-y divide-[var(--color-border)]/60 overflow-hidden">
-          {brief.priorities.map((p, i) => (
+          {priorities.map((p, i) => (
             <PriorityRow key={p.opportunity_id} p={p} rank={i + 1} />
           ))}
         </Card>
