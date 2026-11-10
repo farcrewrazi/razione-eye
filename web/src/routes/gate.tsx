@@ -13,7 +13,7 @@
  * (task DONE, opportunity → APPLIED + applied_date, events recorded).
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import {
@@ -90,10 +90,160 @@ function StatusFilterTabs({
   )
 }
 
+/* ─── Tailored-CV viewer (renders payload.cv_markdown) ──────────────────────── */
+
+/**
+ * Minimal markdown → React renderer. Deliberately dependency-free: the web app
+ * ships no markdown package, and the only input here is our own tailored CV
+ * (headings, bullets, **bold**, _italic_, rules). Never uses innerHTML.
+ */
+function renderInline(text: string): ReactNode[] {
+  return text.split(/(\*\*[^*]+\*\*|_[^_]+_)/g).filter(Boolean).map((chunk, i) => {
+    if (chunk.startsWith('**') && chunk.endsWith('**')) {
+      return (
+        <strong key={i} className="font-semibold text-[var(--color-text)]">
+          {chunk.slice(2, -2)}
+        </strong>
+      )
+    }
+    if (chunk.length > 2 && chunk.startsWith('_') && chunk.endsWith('_')) {
+      return (
+        <em key={i} className="italic">
+          {chunk.slice(1, -1)}
+        </em>
+      )
+    }
+    return <span key={i}>{chunk}</span>
+  })
+}
+
+function MarkdownCv({ source }: { source: string }) {
+  const blocks: ReactNode[] = []
+  let bullets: string[] = []
+  const flush = (): void => {
+    if (!bullets.length) return
+    blocks.push(
+      <ul key={`ul-${blocks.length}`} className="my-2 flex list-disc flex-col gap-1 pl-5 text-[13px] leading-6">
+        {bullets.map((b, i) => (
+          <li key={i}>{renderInline(b)}</li>
+        ))}
+      </ul>,
+    )
+    bullets = []
+  }
+  for (const raw of source.split('\n')) {
+    const line = raw.trimEnd()
+    if (/^\s*[-*+]\s+/.test(line)) {
+      bullets.push(line.replace(/^\s*[-*+]\s+/, ''))
+      continue
+    }
+    flush()
+    if (!line.trim() || /^---+$/.test(line.trim())) continue
+    if (line.startsWith('### ')) {
+      blocks.push(
+        <h4 key={blocks.length} className="mt-4 text-[13px] font-semibold text-[var(--color-text)]">
+          {renderInline(line.slice(4))}
+        </h4>,
+      )
+    } else if (line.startsWith('## ')) {
+      blocks.push(
+        <h3
+          key={blocks.length}
+          className="mt-5 border-b border-[var(--color-border)] pb-1 font-mono text-[10px] tracking-[0.2em] text-[var(--color-accent)] uppercase"
+        >
+          {renderInline(line.slice(3))}
+        </h3>,
+      )
+    } else if (line.startsWith('# ')) {
+      blocks.push(
+        <h2 key={blocks.length} className="text-base font-semibold tracking-wide text-[var(--color-text)] uppercase">
+          {renderInline(line.slice(2))}
+        </h2>,
+      )
+    } else {
+      blocks.push(
+        <p key={blocks.length} className="text-[13px] leading-6 text-[var(--color-text)]/90">
+          {renderInline(line)}
+        </p>,
+      )
+    }
+  }
+  flush()
+  return <div className="flex flex-col gap-0.5">{blocks}</div>
+}
+
+function CvViewerDialog({ action, onClose }: { action: GateAction; onClose: () => void }) {
+  const cv = action.payload.cv_markdown ?? ''
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const slug = action.payload.cv_file ?? 'tailored-cv.md'
+  const download = (): void => {
+    const blob = new Blob([cv], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = slug
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4" onMouseDown={onClose}>
+      <Card
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cv-viewer-title"
+        className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden px-0 py-0 shadow-xl shadow-black/50"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3 border-b border-[var(--color-border)] px-5 py-3">
+          <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 text-[var(--color-accent)]">
+            <FileText className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <h2 id="cv-viewer-title" className="text-sm font-semibold text-[var(--color-text)]">
+              Tailored CV
+            </h2>
+            <p className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-muted)]" title={action.summary}>
+              {slug} · {action.summary}
+            </p>
+          </div>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={download}>
+              Download .md
+            </Button>
+            <Button variant="ghost" size="sm" autoFocus onClick={onClose} aria-label="Close CV viewer">
+              <X className="size-3.5" />
+            </Button>
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+          <MarkdownCv source={cv} />
+        </div>
+        <div className="flex items-center justify-between gap-2 border-t border-[var(--color-border)] px-5 py-2.5">
+          <p className="font-mono text-[10px] text-[var(--color-muted)]/70">
+            DRAFT — derived from the canonical CV. Nothing has been sent.
+          </p>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </Card>
+    </div>
+  )
+}
+
 /* ─── Payload preview ───────────────────────────────────────────────────────── */
 
 function PayloadPreview({ action }: { action: GateAction }) {
   const p = action.payload
+  const [cvOpen, setCvOpen] = useState(false)
   const hasAnything = p.cover_note || p.resume_version || p.apply_url || p.notes
   return (
     <div className="mt-2 flex flex-col gap-2 rounded-md border border-[var(--color-border)]/70 bg-white/[0.02] px-3 py-2.5">
@@ -113,6 +263,16 @@ function PayloadPreview({ action }: { action: GateAction }) {
             <FileText className="size-3" />
             {p.resume_version}
           </span>
+        )}
+        {p.cv_markdown && (
+          <button
+            type="button"
+            onClick={() => setCvOpen(true)}
+            className="inline-flex items-center gap-1 rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-2 py-0.5 font-mono text-[11px] text-[var(--color-accent)] transition-colors hover:border-[var(--color-accent)]/70 hover:bg-[var(--color-accent)]/20"
+          >
+            <FileText className="size-3" />
+            View updated CV
+          </button>
         )}
         {p.apply_url && (
           <a
@@ -135,6 +295,7 @@ function PayloadPreview({ action }: { action: GateAction }) {
       {!hasAnything && !p.apply_url && (
         <p className="font-mono text-[10px] text-[var(--color-muted)]/60">Empty draft payload.</p>
       )}
+      {cvOpen && <CvViewerDialog action={action} onClose={() => setCvOpen(false)} />}
     </div>
   )
 }

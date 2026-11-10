@@ -620,6 +620,10 @@ export interface ApplyToJobPayload {
   resume_version?: string
   apply_url?: string
   notes?: string
+  /** Tailored CV body (markdown) shipped with the draft so the Gate can render it inline. */
+  cv_markdown?: string
+  /** Source file name of the tailored CV, e.g. "talentbook-solutions-php-developer.md". */
+  cv_file?: string
   [key: string]: unknown // schema is .passthrough()
 }
 
