@@ -33,6 +33,8 @@ import {
   type Node,
   type PreparePitchPayload,
 } from '@razione-eye/shared';
+import { readFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import { getCtx, err } from './http-util.ts';
 import type { AppContext } from './context.ts';
 import { nowIso } from './ulid.ts';
@@ -381,6 +383,44 @@ export const gateRoute = new Hono()
     });
     return c.json(await withLinks(ctx, decided));
   });
+
+/**
+ * GET /api/gate/actions/:id/cv.pdf — the tailored CV behind a draft, as a PDF.
+ *
+ * PDFs are rendered offline (one per tailored CV) and served from EYE_CV_DIR,
+ * mounted read-only at /app/data/cvs. The gate still only *shows* the CV —
+ * nothing is submitted from this route.
+ */
+const CV_DIR = process.env.EYE_CV_DIR ?? '/app/data/cvs';
+
+gateRoute.get('/actions/:id/cv.pdf', async (c) => {
+  const ctx = getCtx(c);
+  const action = await ctx.gate.getById(c.req.param('id'));
+  if (!action) return err(c, 404, 'NOT_FOUND', 'Gate action not found.');
+
+  const payload = action.payload as { cv_pdf?: unknown };
+  const declared = typeof payload.cv_pdf === 'string' ? basename(payload.cv_pdf) : '';
+  if (declared === '' || !/^[A-Za-z0-9._-]+\.pdf$/.test(declared)) {
+    return err(c, 404, 'NOT_FOUND', 'No PDF was prepared for this draft.');
+  }
+
+  let bytes: Buffer;
+  try {
+    bytes = await readFile(join(CV_DIR, declared));
+  } catch {
+    return err(c, 404, 'NOT_FOUND', 'CV PDF is missing on disk — regenerate it.');
+  }
+
+  const attachment = c.req.query('download') === '1';
+  return new Response(new Uint8Array(bytes), {
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Length': String(bytes.byteLength),
+      'Content-Disposition': `${attachment ? 'attachment' : 'inline'}; filename="${declared}"`,
+      'Cache-Control': 'private, max-age=300',
+    },
+  });
+});
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 function isoDaysFromNow(days: number): string {

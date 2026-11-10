@@ -55,6 +55,8 @@ services:
       - "8787"
     volumes:
       - pgbackups:/app/server/backups
+      # Tailored CV PDFs, rendered offline and served by /api/gate/actions/:id/cv.pdf
+      - ${EYE_CV_DIR:-/home/fakhru94/eye-data/cvs}:/app/data/cvs:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8787/api/health').then(r => { if (!r.ok) process.exit(1) })"]

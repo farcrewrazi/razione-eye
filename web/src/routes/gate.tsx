@@ -22,6 +22,7 @@ import {
   Ban,
   Check,
   ClipboardList,
+  Download,
   ExternalLink,
   FileText,
   History,
@@ -32,6 +33,7 @@ import {
 import { approveGateAction, listGateActions, rejectGateAction } from '@/api/provider'
 import type { GateAction, GateStatus } from '@/api/types'
 import { EmptyState, PageHeader, StatusBadge } from '@/components/common'
+import { PdfViewer } from '@/components/common/PdfViewer'
 import { Badge, Button, Card, Input, Skeleton, Textarea, useToast } from '@/components/ui'
 import { useEyeFocus } from '@/hooks/useEyeFocus'
 import { opportunityInEye } from '@/lib/eyes'
@@ -174,6 +176,10 @@ function MarkdownCv({ source }: { source: string }) {
 
 function CvViewerDialog({ action, onClose }: { action: GateAction; onClose: () => void }) {
   const cv = action.payload.cv_markdown ?? ''
+  const pdf = action.payload.cv_pdf ?? ''
+  const slug = action.payload.cv_file ?? 'tailored-cv.md'
+  const pdfUrl = `/api/gate/actions/${action.id}/cv.pdf`
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onClose()
@@ -182,8 +188,7 @@ function CvViewerDialog({ action, onClose }: { action: GateAction; onClose: () =
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const slug = action.payload.cv_file ?? 'tailored-cv.md'
-  const download = (): void => {
+  const downloadMarkdown = (): void => {
     const blob = new Blob([cv], { type: 'text/markdown;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -193,13 +198,16 @@ function CvViewerDialog({ action, onClose }: { action: GateAction; onClose: () =
     URL.revokeObjectURL(url)
   }
 
+  const linkClass =
+    'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs text-[var(--color-text)] transition-colors hover:bg-white/5'
+
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4" onMouseDown={onClose}>
       <Card
         role="dialog"
         aria-modal="true"
         aria-labelledby="cv-viewer-title"
-        className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden px-0 py-0 shadow-xl shadow-black/50"
+        className="flex h-[90vh] w-full max-w-4xl flex-col overflow-hidden px-0 py-0 shadow-xl shadow-black/50"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3 border-b border-[var(--color-border)] px-5 py-3">
@@ -210,22 +218,45 @@ function CvViewerDialog({ action, onClose }: { action: GateAction; onClose: () =
             <h2 id="cv-viewer-title" className="text-sm font-semibold text-[var(--color-text)]">
               Tailored CV
             </h2>
-            <p className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-muted)]" title={action.summary}>
-              {slug} · {action.summary}
+            <p
+              className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-muted)]"
+              title={action.summary}
+            >
+              {pdf || slug} · {action.summary}
             </p>
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={download}>
-              Download .md
-            </Button>
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            {pdf && (
+              <a href={pdfUrl} target="_blank" rel="noreferrer" className={linkClass}>
+                <ExternalLink className="size-3.5" strokeWidth={2} />
+                Open
+              </a>
+            )}
+            {pdf ? (
+              <a href={`${pdfUrl}?download=1`} download className={linkClass}>
+                <Download className="size-3.5" strokeWidth={2} />
+                Download PDF
+              </a>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={downloadMarkdown}>
+                <Download className="size-3.5" strokeWidth={2} />
+                Download .md
+              </Button>
+            )}
             <Button variant="ghost" size="sm" autoFocus onClick={onClose} aria-label="Close CV viewer">
               <X className="size-3.5" />
             </Button>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-          <MarkdownCv source={cv} />
-        </div>
+
+        {pdf ? (
+          <PdfViewer url={pdfUrl} title={action.summary} />
+        ) : (
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+            <MarkdownCv source={cv} />
+          </div>
+        )}
+
         <div className="flex items-center justify-between gap-2 border-t border-[var(--color-border)] px-5 py-2.5">
           <p className="font-mono text-[10px] text-[var(--color-muted)]/70">
             DRAFT — derived from the canonical CV. Nothing has been sent.
@@ -243,7 +274,6 @@ function CvViewerDialog({ action, onClose }: { action: GateAction; onClose: () =
 
 function PayloadPreview({ action }: { action: GateAction }) {
   const p = action.payload
-  const [cvOpen, setCvOpen] = useState(false)
   const hasAnything = p.cover_note || p.resume_version || p.apply_url || p.notes
   return (
     <div className="mt-2 flex flex-col gap-2 rounded-md border border-[var(--color-border)]/70 bg-white/[0.02] px-3 py-2.5">
@@ -263,16 +293,6 @@ function PayloadPreview({ action }: { action: GateAction }) {
             <FileText className="size-3" />
             {p.resume_version}
           </span>
-        )}
-        {p.cv_markdown && (
-          <button
-            type="button"
-            onClick={() => setCvOpen(true)}
-            className="inline-flex items-center gap-1 rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-2 py-0.5 font-mono text-[11px] text-[var(--color-accent)] transition-colors hover:border-[var(--color-accent)]/70 hover:bg-[var(--color-accent)]/20"
-          >
-            <FileText className="size-3" />
-            View updated CV
-          </button>
         )}
         {p.apply_url && (
           <a
@@ -295,7 +315,6 @@ function PayloadPreview({ action }: { action: GateAction }) {
       {!hasAnything && !p.apply_url && (
         <p className="font-mono text-[10px] text-[var(--color-muted)]/60">Empty draft payload.</p>
       )}
-      {cvOpen && <CvViewerDialog action={action} onClose={() => setCvOpen(false)} />}
     </div>
   )
 }
@@ -317,6 +336,8 @@ function GateActionRow({
 }) {
   const pending = action.status === 'PENDING'
   const o = action.opportunity
+  const hasCv = Boolean(action.payload.cv_pdf || action.payload.cv_markdown)
+  const [cvOpen, setCvOpen] = useState(false)
 
   return (
     <div className={cn('flex flex-col gap-1.5 px-4 py-3.5', !pending && 'opacity-75')}>
@@ -399,29 +420,57 @@ function GateActionRow({
         </div>
       )}
 
-      {/* Controls — PENDING only; decisions are FINAL (server 409s anyway) */}
-      {pending && (
+            {/* Controls — decisions only while PENDING; the CV stays viewable after. */}
+      {(pending || hasCv) && (
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
-          <Button size="sm" onClick={() => onApprove(action)} disabled={busy}>
-            <Check className="size-3.5" />
-            Approve
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => onEditApprove(action)} disabled={busy}>
-            <FileText className="size-3.5" />
-            Edit &amp; Approve
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => onReject(action)}
-            disabled={busy}
-            className="text-red-300/90 hover:bg-red-400/10 hover:text-red-300"
-          >
-            <X className="size-3.5" />
-            Reject
-          </Button>
+          {pending && (
+            <>
+              <Button size="sm" onClick={() => onApprove(action)} disabled={busy}>
+                <Check className="size-3.5" />
+                Approve
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => onEditApprove(action)} disabled={busy}>
+                <FileText className="size-3.5" />
+                Edit &amp; Approve
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => onReject(action)}
+                disabled={busy}
+                className="text-red-300/90 hover:bg-red-400/10 hover:text-red-300"
+              >
+                <X className="size-3.5" />
+                Reject
+              </Button>
+            </>
+          )}
+
+          {!pending && hasCv && (
+            <span className="font-mono text-[10px] tracking-wider text-[var(--color-muted)]">
+              DECIDED — CV KEPT FOR REFERENCE
+            </span>
+          )}
+
+          {hasCv && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setCvOpen(true)}
+              title="Open the tailored CV as a PDF"
+              className="ml-auto border-[var(--color-accent)]/40 text-[var(--color-accent)] hover:border-[var(--color-accent)]/70 hover:bg-[var(--color-accent)]/10"
+            >
+              <FileText className="size-3.5" />
+              View updated CV
+              <span className="rounded-sm bg-[var(--color-accent)]/15 px-1 py-px font-mono text-[9px] tracking-wider">
+                PDF
+              </span>
+            </Button>
+          )}
         </div>
       )}
+
+      {cvOpen && <CvViewerDialog action={action} onClose={() => setCvOpen(false)} />}
     </div>
   )
 }

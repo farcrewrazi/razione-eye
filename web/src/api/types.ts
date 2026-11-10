@@ -624,6 +624,8 @@ export interface ApplyToJobPayload {
   cv_markdown?: string
   /** Source file name of the tailored CV, e.g. "talentbook-solutions-php-developer.md". */
   cv_file?: string
+  /** Rendered PDF, served at /api/gate/actions/:id/cv.pdf (absent when none). */
+  cv_pdf?: string
   [key: string]: unknown // schema is .passthrough()
 }
 
