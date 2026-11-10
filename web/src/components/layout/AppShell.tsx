@@ -6,8 +6,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { Link } from 'react-router'
-import { ChevronsLeft, ChevronsRight, X } from 'lucide-react'
+import { ChevronsLeft, ChevronsRight, LogOut, X } from 'lucide-react'
 import { Toaster } from '@/components/ui/toast'
+import { logout } from '@/api/auth'
 import { EyeSwitcher } from '@/components/eye/EyeSwitcher'
 import { EyeFocusProvider, useEyeFocus } from '@/hooks/useEyeFocus'
 import { NAV_ITEMS, crumbsFor } from '@/lib/nav'
@@ -155,6 +156,36 @@ function FocusChip() {
   )
 }
 
+/** Sign-out — clears the session cookie server-side, then lands on /login. */
+function SignOutButton() {
+  const navigate = useNavigate()
+  const [pending, setPending] = useState(false)
+
+  const onSignOut = async (): Promise<void> => {
+    if (pending) return
+    setPending(true)
+    try {
+      if (API_MODE === 'real') await logout()
+    } catch {
+      // Cookie already gone (or backend down) — the login page still works.
+    }
+    navigate('/login', { replace: true })
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onSignOut}
+      disabled={pending}
+      aria-label="Sign out"
+      title="Sign out"
+      className="grid size-8 place-items-center rounded-md border border-[var(--color-border)] text-[var(--color-muted)] transition-colors hover:border-rose-400/50 hover:text-rose-300 disabled:opacity-50"
+    >
+      <LogOut className="size-4" strokeWidth={1.75} />
+    </button>
+  )
+}
+
 function TopBar() {
   const { pathname } = useLocation()
   const crumbs = crumbsFor(pathname)
@@ -198,6 +229,7 @@ function TopBar() {
         <time className="hidden font-mono text-xs tracking-wider text-[var(--color-muted)] tabular-nums sm:inline">
           {date}
         </time>
+        <SignOutButton />
         {/* Razi Profile access — subtle "R" avatar */}
         <Link
           to="/profile"

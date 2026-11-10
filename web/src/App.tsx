@@ -6,8 +6,10 @@
 import { lazy, Suspense, type ReactElement } from 'react'
 import { createBrowserRouter, RouterProvider } from 'react-router'
 import AppShell from '@/components/layout/AppShell'
+import { RequireAuth } from '@/components/auth/RequireAuth'
 import { Skeleton } from '@/components/ui'
 
+const LoginPage = lazy(() => import('@/routes/login'))
 const DashboardPage = lazy(() => import('@/routes/dashboard'))
 const OpportunitiesPage = lazy(() => import('@/routes/opportunities'))
 const OpportunityNewPage = lazy(() => import('@/routes/opportunities-new'))
@@ -48,9 +50,15 @@ function NotFound() {
 }
 
 const router = createBrowserRouter([
+  // Sign-in sits outside the shell: no sidebar before a session exists.
+  { path: '/login', element: lazyPage(<LoginPage />) },
   {
     path: '/',
-    element: <AppShell />,
+    element: (
+      <RequireAuth>
+        <AppShell />
+      </RequireAuth>
+    ),
     children: [
       { index: true, element: lazyPage(<DashboardPage />) },
       // Per-eye homes (EYE-4) — same eye-scoped dashboard, addressable per

@@ -19,6 +19,7 @@ import { err, getCtx } from './http-util.ts';
 import { importRoute } from './import/import-api.ts';
 import { runSeed } from './seed-service.ts';
 import { runBackup } from './backup-service.ts';
+import { authRoute, sessionGuard } from './auth.ts';
 
 export function createApp(db: Pool): { app: Hono; ctx: AppContext } {
   const ctx = makeContext(db);
@@ -51,6 +52,10 @@ export function createApp(db: Pool): { app: Hono; ctx: AppContext } {
     await next();
   });
 
+  // Session gate — one operator, one cookie. /api/health and the trusted
+  // machine IPs (the daily Career Eye cron) pass without one.
+  app.use('/api/*', sessionGuard());
+
   app.onError((e, c) => {
     console.error(e);
     return c.json({ error: { code: 'INTERNAL', message: e.message } }, 500);
@@ -58,6 +63,7 @@ export function createApp(db: Pool): { app: Hono; ctx: AppContext } {
 
   const api = new Hono()
     .route('/health', healthRoute)
+    .route('/auth', authRoute)
     .route('/profile', profileRoute)
     .route('/agents', agentsRoute)
     .route('/opportunities', opportunitiesRoute)

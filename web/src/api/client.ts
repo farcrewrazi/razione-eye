@@ -49,6 +49,12 @@ export async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> 
     }
   }
 
+  // A 401 outside the auth endpoints means the session is gone: let the shell
+  // bounce to /login instead of rendering an error card on every page.
+  if (response.status === 401 && !/\/auth\/(login|me|logout)$/.test(url)) {
+    window.dispatchEvent(new Event('eye:unauthorized'))
+  }
+
   if (!response.ok) {
     const envelope = payload as ErrorEnvelope | null
     if (envelope && typeof envelope.error?.code === 'string' && typeof envelope.error?.message === 'string') {
