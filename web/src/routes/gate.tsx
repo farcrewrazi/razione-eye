@@ -578,23 +578,22 @@ function ProposalViewerDialog({ action, onClose }: { action: GateAction; onClose
           </Button>
         </div>
 
-        {/* Body */}
-        <div className="min-h-0 flex-1 overflow-hidden p-3">
-          {pdf ? (
-            <PdfViewer url={pdfUrl} title={`RaziSurf proposal — ${company}`} />
-          ) : markdown ? (
-            <div className="h-full overflow-auto rounded border border-[var(--color-border)]/70 bg-white/[0.02] px-5 py-4">
+        {/* Body — PdfViewer is a direct flex child (like the CV viewer); wrapping it
+            in an overflow-hidden div squeezed its internal scroller. */}
+        {pdf ? (
+          <PdfViewer url={pdfUrl} title={`RaziSurf proposal — ${company}`} />
+        ) : markdown ? (
+          <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
               <MarkdownCv source={markdown} />
-              <p className="mt-4 font-mono text-[10px] text-[var(--color-muted)]/70">
-                Rendered PDF not prepared for this draft — showing the source.
-              </p>
-            </div>
-          ) : (
-            <p className="p-4 text-sm italic text-[var(--color-muted)]">
-              No proposal was prepared for this draft.
+            <p className="mt-4 font-mono text-[10px] text-[var(--color-muted)]/70">
+              Rendered PDF not prepared for this draft — showing the source.
             </p>
-          )}
-        </div>
+          </div>
+        ) : (
+          <p className="min-h-0 flex-1 p-4 text-sm italic text-[var(--color-muted)]">
+            No proposal was prepared for this draft.
+          </p>
+        )}
 
         {/* Footer */}
         <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] px-4 py-2.5">
@@ -993,7 +992,13 @@ export function GatePage() {
     return opportunityInEye(a.opportunity.opportunity_type, eye)
   }
   const items = (data?.items ?? []).filter(inEye)
-  const pendingCount = counts.PENDING
+
+  // Focus-aware counts. The tabs and the header badge count only what this Eye
+  // can act on, so they agree with the list; ALL/CONTROL stay global.
+  const focusedCounts: Record<GateStatus, number> = { PENDING: 0, APPROVED: 0, REJECTED: 0 }
+  for (const a of all?.items ?? []) if (inEye(a)) focusedCounts[a.status]++
+  const tabCounts = focused ? focusedCounts : counts
+  const pendingCount = tabCounts.PENDING
 
   return (
     <div className="flex flex-col gap-4">
@@ -1018,9 +1023,11 @@ export function GatePage() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
-        <StatusFilterTabs value={filter} counts={counts} onChange={setFilter} />
+        <StatusFilterTabs value={filter} counts={tabCounts} onChange={setFilter} />
         <span className="ml-auto font-mono text-[11px] tracking-wider text-[var(--color-muted)] tabular-nums">
-          {isPending ? '…' : `${items.length} TOTAL`}
+          {isPending
+            ? '…'
+            : `${items.length} ${filter === 'ALL' ? 'TOTAL' : filter}${focused ? ` · ${def.label}` : ''}`}
         </span>
       </div>
 
