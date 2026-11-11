@@ -626,6 +626,12 @@ export interface ApplyToJobPayload {
   cv_file?: string
   /** Rendered PDF, served at /api/gate/actions/:id/cv.pdf (absent when none). */
   cv_pdf?: string
+  /** RaziSurf pitch body (markdown) for business drafts (action_type prepare_pitch). */
+  proposal_markdown?: string
+  /** Source file name of the proposal, e.g. "sungai-long-specialist-hospital.md". */
+  proposal_file?: string
+  /** Rendered proposal PDF, served at /api/gate/actions/:id/document.pdf. */
+  proposal_pdf?: string
   [key: string]: unknown // schema is .passthrough()
 }
 

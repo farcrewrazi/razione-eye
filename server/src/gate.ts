@@ -17,7 +17,7 @@
  * v0.x reality (doc 03 §4): "execute" means the system hands Razi a ready-to-paste
  * kit and marks it done on confirm — no auto-apply exists, by design.
  */
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import {
   applyToJobPayloadSchema,
   approveGateActionSchema,
@@ -385,30 +385,42 @@ export const gateRoute = new Hono()
   });
 
 /**
- * GET /api/gate/actions/:id/cv.pdf — the tailored CV behind a draft, as a PDF.
+ * Document PDFs behind a draft, served from disk. Two families, one rail:
  *
- * PDFs are rendered offline (one per tailored CV) and served from EYE_CV_DIR,
- * mounted read-only at /app/data/cvs. The gate still only *shows* the CV —
- * nothing is submitted from this route.
+ *   • tailored CV   — payload.cv_pdf,       rendered offline into EYE_CV_DIR
+ *   • pitch proposal — payload.proposal_pdf, rendered offline into EYE_PROPOSAL_DIR
+ *
+ * The gate only *shows* these documents — nothing is submitted from either route.
+ * `/cv.pdf` stays exactly as it was (career drafts); `/document.pdf` serves
+ * whichever document the draft carries, so the business "View proposal" button
+ * and the career "View updated CV" button share one implementation.
  */
 const CV_DIR = process.env.EYE_CV_DIR ?? '/app/data/cvs';
+const PROPOSAL_DIR = process.env.EYE_PROPOSAL_DIR ?? '/app/data/proposals';
 
-gateRoute.get('/actions/:id/cv.pdf', async (c) => {
+/** Serve one prepared PDF from `dir`, or a 404 envelope explaining what is missing. */
+async function servePreparedPdf(
+  c: Context,
+  dir: string,
+  missingLabel: string,
+): Promise<Response> {
   const ctx = getCtx(c);
-  const action = await ctx.gate.getById(c.req.param('id'));
+  const id = c.req.param('id') ?? '';
+  const action = await ctx.gate.getById(id);
   if (!action) return err(c, 404, 'NOT_FOUND', 'Gate action not found.');
 
-  const payload = action.payload as { cv_pdf?: unknown };
-  const declared = typeof payload.cv_pdf === 'string' ? basename(payload.cv_pdf) : '';
+  const payload = action.payload as { cv_pdf?: unknown; proposal_pdf?: unknown };
+  const declaredField = dir === PROPOSAL_DIR ? payload.proposal_pdf : payload.cv_pdf;
+  const declared = typeof declaredField === 'string' ? basename(declaredField) : '';
   if (declared === '' || !/^[A-Za-z0-9._-]+\.pdf$/.test(declared)) {
     return err(c, 404, 'NOT_FOUND', 'No PDF was prepared for this draft.');
   }
 
   let bytes: Buffer;
   try {
-    bytes = await readFile(join(CV_DIR, declared));
+    bytes = await readFile(join(dir, declared));
   } catch {
-    return err(c, 404, 'NOT_FOUND', 'CV PDF is missing on disk — regenerate it.');
+    return err(c, 404, 'NOT_FOUND', `${missingLabel} PDF is missing on disk — regenerate it.`);
   }
 
   const attachment = c.req.query('download') === '1';
@@ -420,6 +432,22 @@ gateRoute.get('/actions/:id/cv.pdf', async (c) => {
       'Cache-Control': 'private, max-age=300',
     },
   });
+}
+
+gateRoute.get('/actions/:id/cv.pdf', (c) => servePreparedPdf(c, CV_DIR, 'CV'));
+
+/**
+ * The generalized route: serve whichever document this draft carries, proposal
+ * first (a business pitch draft) then CV (a career draft). Used by the Action
+ * Gate's "View proposal" button; the CV button keeps its own route above.
+ */
+gateRoute.get('/actions/:id/document.pdf', async (c) => {
+  const ctx = getCtx(c);
+  const action = await ctx.gate.getById(c.req.param('id'));
+  if (!action) return err(c, 404, 'NOT_FOUND', 'Gate action not found.');
+  const payload = action.payload as { cv_pdf?: unknown; proposal_pdf?: unknown };
+  const hasProposal = typeof payload.proposal_pdf === 'string' && payload.proposal_pdf !== '';
+  return servePreparedPdf(c, hasProposal ? PROPOSAL_DIR : CV_DIR, hasProposal ? 'Proposal' : 'CV');
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;

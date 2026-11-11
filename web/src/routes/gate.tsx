@@ -337,7 +337,11 @@ function GateActionRow({
   const pending = action.status === 'PENDING'
   const o = action.opportunity
   const hasCv = Boolean(action.payload.cv_pdf || action.payload.cv_markdown)
+  // Business pitch drafts carry a proposal instead of a CV; the two are
+  // mutually exclusive by payload, so exactly one button ever renders.
+  const hasProposal = Boolean(action.payload.proposal_pdf || action.payload.proposal_markdown)
   const [cvOpen, setCvOpen] = useState(false)
+  const [proposalOpen, setProposalOpen] = useState(false)
 
   return (
     <div className={cn('flex flex-col gap-1.5 px-4 py-3.5', !pending && 'opacity-75')}>
@@ -420,8 +424,8 @@ function GateActionRow({
         </div>
       )}
 
-            {/* Controls — decisions only while PENDING; the CV stays viewable after. */}
-      {(pending || hasCv) && (
+            {/* Controls — decisions only while PENDING; the document stays viewable after. */}
+      {(pending || hasCv || hasProposal) && (
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           {pending && (
             <>
@@ -467,10 +471,147 @@ function GateActionRow({
               </span>
             </Button>
           )}
+
+          {hasProposal && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setProposalOpen(true)}
+              title="Open the RaziSurf proposal as a PDF"
+              className="ml-auto border-emerald-400/40 text-emerald-300 hover:border-emerald-400/70 hover:bg-emerald-400/10"
+            >
+              <FileText className="size-3.5" />
+              View proposal
+              <span className="rounded-sm bg-emerald-400/15 px-1 py-px font-mono text-[9px] tracking-wider">
+                PDF
+              </span>
+            </Button>
+          )}
         </div>
       )}
 
       {cvOpen && <CvViewerDialog action={action} onClose={() => setCvOpen(false)} />}
+      {proposalOpen && (
+        <ProposalViewerDialog action={action} onClose={() => setProposalOpen(false)} />
+      )}
+    </div>
+  )
+}
+
+/* ─── Proposal viewer (the RaziSurf pitch behind a business draft) ──────────── */
+
+/**
+ * Same contract as the CV viewer: pdf.js renders payload.proposal_pdf from the
+ * gate's own /document.pdf route (the session cookie rides along), with the
+ * markdown as a readable fallback and a markdown download action. Business
+ * drafts only — career drafts still get CvViewerDialog.
+ */
+function ProposalViewerDialog({ action, onClose }: { action: GateAction; onClose: () => void }) {
+  const markdown = action.payload.proposal_markdown ?? ''
+  const pdf = action.payload.proposal_pdf ?? ''
+  const slug = action.payload.proposal_file ?? 'razisurf-proposal.md'
+  const pdfUrl = `/api/gate/actions/${action.id}/document.pdf`
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const downloadMarkdown = (): void => {
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = slug
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const rawCompany = action.opportunity?.data.company
+  const company =
+    action.opportunity?.company?.name ??
+    (typeof rawCompany === 'string' && rawCompany.trim() !== '' ? rawCompany : undefined) ??
+    action.summary.replace(/^Prepare pitch —\s*/, '')
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`RaziSurf proposal for ${company}`}
+    >
+      <div
+        className="flex h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-4 py-2.5">
+          <FileText className="size-4 text-emerald-300/90" />
+          <div className="min-w-0">
+            <p className="truncate text-[13px] font-semibold text-[var(--color-text)]">
+              RaziSurf proposal — {company}
+            </p>
+            <p className="font-mono text-[10px] tracking-wider text-[var(--color-muted)] uppercase">
+              Pitch document · PDF
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="ml-auto"
+            onClick={onClose}
+            aria-label="Close proposal viewer"
+          >
+            <X className="size-4" />
+          </Button>
+        </div>
+
+        {/* Body */}
+        <div className="min-h-0 flex-1 overflow-hidden p-3">
+          {pdf ? (
+            <PdfViewer url={pdfUrl} title={`RaziSurf proposal — ${company}`} />
+          ) : markdown ? (
+            <div className="h-full overflow-auto rounded border border-[var(--color-border)]/70 bg-white/[0.02] px-5 py-4">
+              <MarkdownCv source={markdown} />
+              <p className="mt-4 font-mono text-[10px] text-[var(--color-muted)]/70">
+                Rendered PDF not prepared for this draft — showing the source.
+              </p>
+            </div>
+          ) : (
+            <p className="p-4 text-sm italic text-[var(--color-muted)]">
+              No proposal was prepared for this draft.
+            </p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] px-4 py-2.5">
+          <a
+            href={`${pdfUrl}?download=1`}
+            className="inline-flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1 font-mono text-[11px] text-[var(--color-muted)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)]"
+          >
+            <FileText className="size-3" />
+            Download PDF
+          </a>
+          {markdown && (
+            <button
+              type="button"
+              onClick={downloadMarkdown}
+              className="inline-flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1 font-mono text-[11px] text-[var(--color-muted)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)]"
+            >
+              <FileText className="size-3" />
+              Download markdown
+            </button>
+          )}
+          <span className="ml-auto font-mono text-[10px] text-[var(--color-muted)]/70">
+            READ-ONLY — APPROVE TO RECORD THE SEND
+          </span>
+        </div>
+      </div>
     </div>
   )
 }
