@@ -274,17 +274,25 @@ function CvViewerDialog({ action, onClose }: { action: GateAction; onClose: () =
 
 function PayloadPreview({ action }: { action: GateAction }) {
   const p = action.payload
-  const hasAnything = p.cover_note || p.resume_version || p.apply_url || p.notes
+  // Business pitch drafts keep their internal notes in `description`; career
+  // drafts keep a cover note. Same slot, vocabulary per Eye.
+  const isPitch = action.action_type === 'prepare_pitch'
+  const narrative = isPitch ? (p.description ?? '') : (p.cover_note ?? '')
+  const hasAnything = Boolean(narrative || p.resume_version || p.apply_url || p.notes)
   return (
     <div className="mt-2 flex flex-col gap-2 rounded-md border border-[var(--color-border)]/70 bg-white/[0.02] px-3 py-2.5">
-      {p.cover_note ? (
+      {narrative ? (
         <div>
-          <p className="font-mono text-[9px] tracking-[0.2em] text-[var(--color-muted)]">COVER NOTE</p>
-          <p className="mt-1 text-[13px] leading-5 text-[var(--color-text)]/90">{p.cover_note}</p>
+          <p className="font-mono text-[9px] tracking-[0.2em] text-[var(--color-muted)]">
+            {isPitch ? 'DESCRIPTION' : 'COVER NOTE'}
+          </p>
+          <p className="mt-1 text-[13px] leading-5 text-[var(--color-text)]/90">{narrative}</p>
         </div>
       ) : (
         <p className="text-xs italic text-[var(--color-muted)]/70">
-          No cover note drafted yet — add one via Edit &amp; Approve.
+          {isPitch
+            ? 'No description drafted yet — add one via Edit & Approve.'
+            : 'No cover note drafted yet — add one via Edit & Approve.'}
         </p>
       )}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-[var(--color-muted)]">

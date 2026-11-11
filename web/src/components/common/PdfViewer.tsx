@@ -21,8 +21,14 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
-import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from 'pdfjs-dist'
+import {
+  getDocument,
+  GlobalWorkerOptions,
+  TextLayer,
+  type PDFDocumentProxy,
+} from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import 'pdfjs-dist/web/pdf_viewer.css'
 
 GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -37,6 +43,7 @@ const ZOOM_MAX = 3
 export function PdfViewer({ url, title }: { url: string; title: string }) {
   const scrollerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const textLayerRef = useRef<HTMLDivElement>(null)
   const docRef = useRef<PDFDocumentProxy | null>(null)
   const [page, setPage] = useState(1)
   const [pageCount, setPageCount] = useState(0)
@@ -114,6 +121,21 @@ export function PdfViewer({ url, title }: { url: string; title: string }) {
       const task = pdfPage.render({ canvas, viewport })
       renderTask = task
       await task.promise
+
+      // Text layer: transparent, absolutely positioned over the canvas, so the
+      // page is selectable/copyable while looking exactly like the render.
+      const layer = textLayerRef.current
+      if (layer && !cancelled) {
+        layer.replaceChildren()
+        layer.style.width = `${Math.floor(viewport.width / devicePixelRatio)}px`
+        layer.style.height = `${Math.floor(viewport.height / devicePixelRatio)}px`
+        const textLayer = new TextLayer({
+          textContentSource: await pdfPage.getTextContent(),
+          container: layer,
+          viewport: pdfPage.getViewport({ scale }),
+        })
+        await textLayer.render()
+      }
     }
 
     paint().catch((error: unknown) => {
@@ -234,7 +256,7 @@ export function PdfViewer({ url, title }: { url: string; title: string }) {
         </div>
       </div>
 
-      <div ref={scrollerRef} className="min-h-0 flex-1 overflow-auto bg-[#0a0a0f]">
+      <div ref={scrollerRef} className="relative min-h-0 flex-1 overflow-auto bg-[#0a0a0f]">
         {status === 'loading' && (
           <div className="grid h-full place-items-center">
             <span className="inline-flex items-center gap-2 font-mono text-[11px] tracking-[0.2em] text-[var(--color-muted)]">
@@ -256,15 +278,23 @@ export function PdfViewer({ url, title }: { url: string; title: string }) {
           </div>
         )}
 
-        {/* min-w/h-full + flex centering keeps the sheet centred without
-            clipping its top or left edge when zoomed past the viewport. */}
-        <div className="flex min-h-full min-w-full items-start justify-center p-3">
-          <canvas
-            ref={canvasRef}
-            className={status === 'ready' ? 'block shadow-lg shadow-black/40' : 'hidden'}
-            aria-label={title}
-            role="img"
-          />
+        {/* w-max keeps the sheet at its intrinsic size so the scroller actually
+            overflows (previously min-h-full squeezed the canvas and killed the
+            scrollbar). The text layer sits absolutely over the canvas. */}
+        <div className="flex w-max min-w-full justify-center p-3">
+          <div className={status === 'ready' ? 'relative shadow-lg shadow-black/40' : 'relative hidden'}>
+            <canvas
+              ref={canvasRef}
+              className="block"
+              aria-label={title}
+              role="img"
+            />
+            <div
+              ref={textLayerRef}
+              className="textLayer absolute top-0 left-0 origin-top-left select-text"
+              aria-hidden="true"
+            />
+          </div>
         </div>
       </div>
     </div>
