@@ -272,6 +272,45 @@ function CvViewerDialog({ action, onClose }: { action: GateAction; onClose: () =
 
 /* ─── Payload preview ───────────────────────────────────────────────────────── */
 
+/**
+ * Render a multi-line description as scannable rows. A description is written
+ * as lines of the form "**Label:** value" (Fit / Sub-scores / Where / Hook /
+ * Signal / Source / Contact / Portfolio); each becomes a labelled row so a long
+ * note reads as bullets rather than one wrapped paragraph. Blank lines are
+ * dropped and anything without a label falls through as plain text.
+ */
+function NarrativeLines({ source }: { source: string }) {
+  const rows = source
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '')
+    .map((line) => {
+      const m = /^\*\*(.+?):\*\*\s*(.*)$/.exec(line)
+      return m ? { label: m[1], value: m[2], raw: '' } : { label: '', value: '', raw: line }
+    })
+
+  return (
+    <ul className="mt-2 flex flex-col gap-1.5">
+      {rows.map((r, i) => (
+        <li key={i} className="min-w-0 text-[12.5px] leading-5">
+          {r.label ? (
+            <>
+              {/* label above value: every value starts at the same left edge, so
+                  the block scans as a list instead of a ragged column. */}
+              <span className="block font-mono text-[9px] tracking-[0.18em] text-[var(--color-muted)] uppercase">
+                {r.label}
+              </span>
+              <span className="mt-px block break-words text-[var(--color-text)]/90">{r.value}</span>
+            </>
+          ) : (
+            <span className="block text-[var(--color-text)]/90">{r.raw}</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function PayloadPreview({ action }: { action: GateAction }) {
   const p = action.payload
   // Business pitch drafts keep their internal notes in `description`; career
@@ -286,7 +325,9 @@ function PayloadPreview({ action }: { action: GateAction }) {
           <p className="font-mono text-[9px] tracking-[0.2em] text-[var(--color-muted)]">
             {isPitch ? 'DESCRIPTION' : 'COVER NOTE'}
           </p>
-          <p className="mt-1 text-[13px] leading-5 text-[var(--color-text)]/90">{narrative}</p>
+          {isPitch ? <NarrativeLines source={narrative} /> : (
+            <p className="mt-1 text-[13px] leading-5 text-[var(--color-text)]/90">{narrative}</p>
+          )}
         </div>
       ) : (
         <p className="text-xs italic text-[var(--color-muted)]/70">
