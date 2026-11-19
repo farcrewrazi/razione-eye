@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import {
@@ -25,6 +26,7 @@ import {
   Download,
   ExternalLink,
   FileText,
+  FileWarning,
   History,
   ShieldCheck,
   StickyNote,
@@ -201,7 +203,13 @@ function CvViewerDialog({ action, onClose }: { action: GateAction; onClose: () =
   const linkClass =
     'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs text-[var(--color-text)] transition-colors hover:bg-white/5'
 
-  return (
+  // Portalled to <body> on purpose. This viewer is mounted from inside the queue
+  // row, and a DECIDED row carries `opacity-75` — which creates a stacking
+  // context. A fixed overlay rendered inside that context is painted inside the
+  // row, so the *next* sibling card paints over the "modal" and it reads as a
+  // half-open panel instead of an overlay. Portalling escapes every ancestor
+  // stacking context, transform and overflow.
+  return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4" onMouseDown={onClose}>
       <Card
         role="dialog"
@@ -266,7 +274,8 @@ function CvViewerDialog({ action, onClose }: { action: GateAction; onClose: () =
           </Button>
         </div>
       </Card>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -331,9 +340,13 @@ function PayloadPreview({ action }: { action: GateAction }) {
         </div>
       ) : (
         <p className="text-xs italic text-[var(--color-muted)]/70">
-          {isPitch
-            ? 'No description drafted yet — add one via Edit & Approve.'
-            : 'No cover note drafted yet — add one via Edit & Approve.'}
+          {action.status === 'PENDING'
+            ? isPitch
+              ? 'No description drafted yet — add one via Edit & Approve.'
+              : 'No cover note drafted yet — add one via Edit & Approve.'
+            : isPitch
+              ? 'No description was drafted for this action.'
+              : 'No cover note was drafted for this action.'}
         </p>
       )}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-[var(--color-muted)]">
@@ -362,7 +375,9 @@ function PayloadPreview({ action }: { action: GateAction }) {
         </p>
       )}
       {!hasAnything && !p.apply_url && (
-        <p className="font-mono text-[10px] text-[var(--color-muted)]/60">Empty draft payload.</p>
+        <p className="font-mono text-[10px] text-[var(--color-muted)]/60">
+          {action.status === 'PENDING' ? 'Empty draft payload.' : 'No draft payload was recorded.'}
+        </p>
       )}
     </div>
   )
@@ -389,6 +404,8 @@ function GateActionRow({
   // Business pitch drafts carry a proposal instead of a CV; the two are
   // mutually exclusive by payload, so exactly one button ever renders.
   const hasProposal = Boolean(action.payload.proposal_pdf || action.payload.proposal_markdown)
+  /** Decided, but the payload never carried a document to open. */
+  const noDocumentOnFile = !pending && !hasCv && !hasProposal
   const [cvOpen, setCvOpen] = useState(false)
   const [proposalOpen, setProposalOpen] = useState(false)
 
@@ -474,7 +491,7 @@ function GateActionRow({
       )}
 
             {/* Controls — decisions only while PENDING; the document stays viewable after. */}
-      {(pending || hasCv || hasProposal) && (
+      {(pending || hasCv || hasProposal || noDocumentOnFile) && (
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           {pending && (
             <>
@@ -502,6 +519,20 @@ function GateActionRow({
           {!pending && hasCv && (
             <span className="font-mono text-[10px] tracking-wider text-[var(--color-muted)]">
               DECIDED — CV KEPT FOR REFERENCE
+            </span>
+          )}
+
+          {/* A decided row whose payload carries no document has nothing to open.
+              Say so plainly instead of rendering an empty control strip — a
+              silently missing button reads as a broken row. */}
+          {!pending && !hasCv && !hasProposal && (
+            <span
+              className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-wider text-[var(--color-muted)]/70"
+              title="This action was recorded without a drafted document (no CV or proposal was prepared for it)."
+            >
+              <FileWarning className="size-3" />
+              NO DOCUMENT ON FILE — DECIDED WITHOUT A DRAFTED{' '}
+              {action.action_type === 'prepare_pitch' ? 'PROPOSAL' : 'CV'}
             </span>
           )}
 
@@ -585,7 +616,10 @@ function ProposalViewerDialog({ action, onClose }: { action: GateAction; onClose
     (typeof rawCompany === 'string' && rawCompany.trim() !== '' ? rawCompany : undefined) ??
     action.summary.replace(/^Prepare pitch —\s*/, '')
 
-  return (
+  // Portalled for the same reason as CvViewerDialog: it opens from inside a
+  // decided (opacity-75) row, whose stacking context otherwise traps the fixed
+  // overlay under the sibling cards.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
       onClick={onClose}
@@ -660,7 +694,8 @@ function ProposalViewerDialog({ action, onClose }: { action: GateAction; onClose
           </span>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
