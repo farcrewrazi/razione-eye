@@ -124,7 +124,9 @@ function renderInline(text: string): ReactNode[] {
 function MarkdownCv({ source }: { source: string }) {
   const blocks: ReactNode[] = []
   let bullets: string[] = []
-  const flush = (): void => {
+  let para: string[] = []
+
+  const flushBullets = (): void => {
     if (!bullets.length) return
     blocks.push(
       <ul key={`ul-${blocks.length}`} className="my-2 flex list-disc flex-col gap-1 pl-5 text-[13px] leading-6">
@@ -135,45 +137,68 @@ function MarkdownCv({ source }: { source: string }) {
     )
     bullets = []
   }
+  const flushPara = (): void => {
+    if (!para.length) return
+    blocks.push(
+      <p key={`p-${blocks.length}`} className="text-[13px] leading-6 text-[var(--color-text)]/90">
+        {renderInline(para.join(' '))}
+      </p>,
+    )
+    para = []
+  }
+  const flushAll = (): void => {
+    flushPara()
+    flushBullets()
+  }
+
   for (const raw of source.split('\n')) {
     const line = raw.trimEnd()
+    const trimmed = line.trim()
+    // Source CVs are hard-wrapped at ~100 columns. A wrapped line is a
+    // CONTINUATION of the block above it, not a new block: rendering each one
+    // as its own paragraph/bullet doubles the document and breaks every
+    // sentence across two lines.
     if (/^\s*[-*+]\s+/.test(line)) {
+      flushPara()
       bullets.push(line.replace(/^\s*[-*+]\s+/, ''))
       continue
     }
-    flush()
-    if (!line.trim() || /^---+$/.test(line.trim())) continue
-    if (line.startsWith('### ')) {
+    if (!trimmed || /^---+$/.test(trimmed)) {
+      flushAll()
+      continue
+    }
+    if (trimmed.startsWith('### ')) {
+      flushAll()
       blocks.push(
         <h4 key={blocks.length} className="mt-4 text-[13px] font-semibold text-[var(--color-text)]">
-          {renderInline(line.slice(4))}
+          {renderInline(trimmed.slice(4))}
         </h4>,
       )
-    } else if (line.startsWith('## ')) {
+    } else if (trimmed.startsWith('## ')) {
+      flushAll()
       blocks.push(
         <h3
           key={blocks.length}
           className="mt-5 border-b border-[var(--color-border)] pb-1 font-mono text-[10px] tracking-[0.2em] text-[var(--color-accent)] uppercase"
         >
-          {renderInline(line.slice(3))}
+          {renderInline(trimmed.slice(3))}
         </h3>,
       )
-    } else if (line.startsWith('# ')) {
+    } else if (trimmed.startsWith('# ')) {
+      flushAll()
       blocks.push(
         <h2 key={blocks.length} className="text-base font-semibold tracking-wide text-[var(--color-text)] uppercase">
-          {renderInline(line.slice(2))}
+          {renderInline(trimmed.slice(2))}
         </h2>,
       )
+    } else if (bullets.length) {
+      bullets[bullets.length - 1] += ` ${trimmed}`
     } else {
-      blocks.push(
-        <p key={blocks.length} className="text-[13px] leading-6 text-[var(--color-text)]/90">
-          {renderInline(line)}
-        </p>,
-      )
+      para.push(trimmed)
     }
   }
-  flush()
-  return <div className="flex flex-col gap-0.5">{blocks}</div>
+  flushAll()
+  return <div className="flex flex-col gap-1">{blocks}</div>
 }
 
 type CvFormat = 'pdf' | 'md'
