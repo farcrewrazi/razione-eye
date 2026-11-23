@@ -176,11 +176,82 @@ function MarkdownCv({ source }: { source: string }) {
   return <div className="flex flex-col gap-0.5">{blocks}</div>
 }
 
+type CvFormat = 'pdf' | 'md'
+
+/**
+ * Format switch for the CV viewer. Both formats are shown even when only one
+ * exists: a disabled PDF tab with an explaining tooltip is how the queue says
+ * "the markdown is drafted, the PDF has not been rendered yet" — silently
+ * hiding the tab reads as a missing document instead.
+ */
+function FormatToggle({
+  value,
+  onChange,
+  hasPdf,
+  hasMd,
+}: {
+  value: CvFormat
+  onChange: (f: CvFormat) => void
+  hasPdf: boolean
+  hasMd: boolean
+}) {
+  const options: Array<{ value: CvFormat; label: string; enabled: boolean; hint: string }> = [
+    {
+      value: 'pdf',
+      label: 'PDF',
+      enabled: hasPdf,
+      hint: hasPdf ? 'Show the rendered PDF' : 'No PDF rendered for this draft yet — markdown only.',
+    },
+    {
+      value: 'md',
+      label: 'MARKDOWN',
+      enabled: hasMd,
+      hint: hasMd ? 'Show the markdown source' : 'No markdown source stored on this draft.',
+    },
+  ]
+  return (
+    <div
+      role="tablist"
+      aria-label="CV format"
+      className="inline-flex items-center gap-0.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5"
+    >
+      {options.map(({ value: v, label, enabled, hint }) => {
+        const active = value === v
+        return (
+          <button
+            key={v}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            disabled={!enabled}
+            title={hint}
+            onClick={() => onChange(v)}
+            className={cn(
+              'inline-flex h-6 items-center rounded px-2 font-mono text-[9px] tracking-wider transition-colors',
+              'outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60',
+              !enabled && 'cursor-not-allowed opacity-40',
+              active
+                ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                : 'text-[var(--color-muted)] hover:bg-white/5 hover:text-[var(--color-text)]',
+            )}
+          >
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function CvViewerDialog({ action, onClose }: { action: GateAction; onClose: () => void }) {
   const cv = action.payload.cv_markdown ?? ''
   const pdf = action.payload.cv_pdf ?? ''
-  const slug = action.payload.cv_file ?? 'tailored-cv.md'
+  const mdSlug = action.payload.cv_file ?? 'tailored-cv.md'
   const pdfUrl = `/api/gate/actions/${action.id}/cv.pdf`
+  const hasPdf = pdf !== ''
+  const hasMd = cv.trim() !== ''
+  // PDF first when it exists: it is the file the user would actually send.
+  const [format, setFormat] = useState<CvFormat>(hasPdf ? 'pdf' : 'md')
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -191,11 +262,12 @@ function CvViewerDialog({ action, onClose }: { action: GateAction; onClose: () =
   }, [onClose])
 
   const downloadMarkdown = (): void => {
+    const name = /\.(md|markdown|txt)$/i.test(mdSlug) ? mdSlug : `${mdSlug}.md`
     const blob = new Blob([cv], { type: 'text/markdown;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = slug
+    a.download = name
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -230,23 +302,24 @@ function CvViewerDialog({ action, onClose }: { action: GateAction; onClose: () =
               className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-muted)]"
               title={action.summary}
             >
-              {pdf || slug} · {action.summary}
+              {format === 'pdf' ? pdf : mdSlug} · {action.summary}
             </p>
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-1">
-            {pdf && (
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <FormatToggle value={format} onChange={setFormat} hasPdf={hasPdf} hasMd={hasMd} />
+            {format === 'pdf' && hasPdf && (
               <a href={pdfUrl} target="_blank" rel="noreferrer" className={linkClass}>
                 <ExternalLink className="size-3.5" strokeWidth={2} />
                 Open
               </a>
             )}
-            {pdf ? (
+            {format === 'pdf' && hasPdf ? (
               <a href={`${pdfUrl}?download=1`} download className={linkClass}>
                 <Download className="size-3.5" strokeWidth={2} />
                 Download PDF
               </a>
             ) : (
-              <Button variant="ghost" size="sm" onClick={downloadMarkdown}>
+              <Button variant="ghost" size="sm" onClick={downloadMarkdown} disabled={!hasMd}>
                 <Download className="size-3.5" strokeWidth={2} />
                 Download .md
               </Button>
@@ -257,7 +330,7 @@ function CvViewerDialog({ action, onClose }: { action: GateAction; onClose: () =
           </div>
         </div>
 
-        {pdf ? (
+        {format === 'pdf' && hasPdf ? (
           <PdfViewer url={pdfUrl} title={action.summary} />
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
@@ -541,14 +614,11 @@ function GateActionRow({
               size="sm"
               variant="outline"
               onClick={() => setCvOpen(true)}
-              title="Open the tailored CV as a PDF"
+              title="Open the tailored CV — view or download as PDF or Markdown"
               className="ml-auto border-[var(--color-accent)]/40 text-[var(--color-accent)] hover:border-[var(--color-accent)]/70 hover:bg-[var(--color-accent)]/10"
             >
               <FileText className="size-3.5" />
               View updated CV
-              <span className="rounded-sm bg-[var(--color-accent)]/15 px-1 py-px font-mono text-[9px] tracking-wider">
-                PDF
-              </span>
             </Button>
           )}
 
