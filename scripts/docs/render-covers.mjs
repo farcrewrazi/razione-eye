@@ -13,9 +13,8 @@
  * Subject: "Re: Application for <role> — <company>".
  * Body: hard-wrapped source is re-joined into flowing paragraphs (a wrapped
  *   sentence split over 3 lines renders as ONE paragraph). Blank lines separate
- *   paragraphs. ~10.5pt, leading ~15.5pt, 85pt side margins (~75 chars), left aligned.
- * Signature block: "Regards," / name (bold). The contact line lives in the
- *   letterhead ONLY — printing it twice on a one-page letter looks like a draft.
+ *   paragraphs. ~10.5pt, leading ~15.5pt, left aligned.
+ * Signature block kept on its own lines: "Regards," / name (bold) / contact (muted).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -165,39 +164,132 @@ function parseCoverNote(raw) {
   }
   flush();
 
-  // Shape B inline blob: no blank lines means one giant paragraph. Re-split it
-  // into readable paragraphs at sentence boundaries (2-4 sentences each).
-  if (paragraphs.length === 1 && paragraphs[0].length > 420) {
-    paragraphs.splice(0, 1, ...splitBlobIntoParagraphs(paragraphs[0]));
+  // Greeting ("Dear X,") is the first paragraph if it looks like one.
+  // Greeting extraction. The greeting must ALWAYS end up as its own block, so we
+  // peel it off BEFORE any paragraph re-split. Two cases:
+  //   1) the salutation is already its own line ("Dear X,"); or
+  //   2) the salutation shares the first line with body text (the inline/"Shape B"
+  //      blob: "Dear X, I am applying for ..."). We split at the first comma and
+  //      keep the remainder as the first body paragraph. No wording changes — the
+  //      salutation is moved, not rewritten.
+  let greeting = null;
+  if (paragraphs.length) {
+    const ownLine = /^Dear\b[^,]*,?\s*$/.test(paragraphs[0]);
+    // Salutation runs to the first comma and is short (<=60 chars). Using ',' as
+    // the delimiter (not '.') keeps dotted names like "Mudah.my" intact.
+    const inline = paragraphs[0].match(/^Dear\b[^,]{0,60},\s*/);
+    if (ownLine) {
+      greeting = paragraphs.shift();
+    } else if (inline) {
+      greeting = inline[0].trim();
+      const rest = paragraphs[0].slice(inline[0].length).trim();
+      if (rest) paragraphs[0] = rest;
+      else paragraphs.shift();
+    }
   }
 
-  // Greeting ("Dear X,") is the first paragraph if it looks like one.
-  let greeting = null;
-  if (paragraphs.length && /^Dear\b[^.]*,\s*$/.test(paragraphs[0])) {
-    greeting = paragraphs.shift();
-  } else if (paragraphs.length && /^Dear\b[^.]*,/.test(paragraphs[0]) &&
-             paragraphs[0].length < 60) {
-    greeting = paragraphs.shift();
+  // Readability: a body that arrived as ONE dense paragraph (a pasted-note blob)
+  // is re-split into 2-3 paragraphs at EXISTING sentence boundaries only — the
+  // opening statement of intent, then the closing/gap sentence. Wording is never
+  // added, removed, reworded or reordered; only paragraph breaks are inserted.
+  if (paragraphs.length === 1 && paragraphs[0].length > 230) {
+    const split = splitBodyIntoParagraphs(paragraphs[0]);
+    if (split.length > 1) paragraphs.splice(0, 1, ...split);
   }
 
   return { greeting, paragraphs, signoff, signer, contact };
 }
 
-// Split a long run-on blob into paragraphs at sentence boundaries, targeting
-// ~3 sentences per paragraph.
-function splitBlobIntoParagraphs(blob) {
-  const sentences = blob.split(/(?<=[.!?])\s+(?=[A-Z("])/);
-  const out = [];
-  let cur = [];
-  for (const s of sentences) {
-    cur.push(s);
-    if (cur.length >= 3 && cur.join(' ').length > 220) {
-      out.push(cur.join(' '));
-      cur = [];
+// Split a single dense body paragraph into 2-3 paragraphs at EXISTING sentence
+// boundaries only. Never adds, removes, rewords or reorders a single word.
+// Preference order:
+//   1) break after the opening statement of intent (the sentence naming the role
+//      / why he is writing), then
+//   2) break before the closing/gap sentence (e.g. "I have not worked in Go,
+//      TypeScript or Next.js." / "I would be glad to go deeper on either.").
+// Guarantees: non-final paragraphs are never a lone short sentence; the final
+// gap/closing sentence may stand alone — that is the intended closing paragraph.
+// The opening statement of intent: the sentence naming the role / why he writes.
+// Kept to sentence-boundary verbs/phrases only so a paragraph break is inserted
+// at an EXISTING sentence end and no wording is ever touched.
+const INTENT_RE = /\b(applying for|am writing|like to be considered for|expressing my interest)\b/i;
+const GAP_RES = [
+  /^I have not\b/i,   // "I have not worked in ...", "I have not used ...", "I have not built ...", "I have not yet ..."
+  /^I should\b/i,     // "I should flag ...", "I should be direct ..."
+  /^I will be direct\b/i,
+  /^To be direct\b/i,
+  /^Two honest gaps\b/i,
+  /^I would be glad\b/i,
+  /^I would welcome\b/i,
+  /^I do not hold\b/i,
+  /^Redis,\s+GraphQL\b/i,
+  /^Python and LangChain\b/i,
+  /^My background is\b/i,
+];
+
+// Split on sentence boundaries only — a '.', '!', '?' followed by whitespace and
+// a capital letter / opening quote / bracket. Never splits inside a sentence.
+function splitSentences(text) {
+  return text.split(/(?<=[.!?])\s+(?=[A-Z(\u201c"])/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function splitBodyIntoParagraphs(body) {
+  const sents = splitSentences(body);
+  if (sents.length < 2) return [body];
+
+  const intentIdx = sents.findIndex((s) => INTENT_RE.test(s));
+  if (intentIdx < 0) {
+    // No opening-statement-of-intent phrase (e.g. the note opens "This role fits
+    // how I already work: ..."). Still avoid a single wall-of-text paragraph:
+    // break before the closing/gap sentence if one matches, otherwise before the
+    // final sentence. Existing sentence boundary only — no wording change.
+    let cut = -1;
+    for (let i = 1; i < sents.length; i++) {
+      if (GAP_RES.some((re) => re.test(sents[i]))) { cut = i; break; }
+    }
+    if (cut < 0) cut = sents.length - 1;
+    if (cut >= 1 && sents.length - cut >= 1) {
+      const a = sents.slice(0, cut).join(' ');
+      const b = sents.slice(cut).join(' ');
+      if (a.trim() && b.trim()) return [a, b];
+    }
+    return [body];
+  }
+
+  // First break: the intent sentence closes paragraph 1. If that alone would be a
+  // lone short sentence, absorb the next sentence(s) so paragraph 1 is a real
+  // paragraph (at most 2 extra sentences).
+  let p1End = intentIdx;
+  while (p1End + 1 < sents.length &&
+         (p1End === intentIdx || sents.slice(0, p1End + 1).join(' ').length < 190) &&
+         p1End - intentIdx < 2) {
+    p1End += 1;
+  }
+
+  // Second break: first closing/gap sentence after paragraph 1.
+  let gapIdx = -1;
+  for (let i = p1End + 1; i < sents.length; i++) {
+    if (GAP_RES.some((re) => re.test(sents[i]))) { gapIdx = i; break; }
+  }
+
+  const paras = [sents.slice(0, p1End + 1).join(' ')];
+  const gapStart = (gapIdx > p1End) ? gapIdx : sents.length;
+
+  const mid = sents.slice(p1End + 1, gapStart);
+  if (mid.length) {
+    // A middle paragraph must not be a lone short sentence; merge it upward.
+    if (mid.length === 1 && mid[0].length < 130) {
+      paras[0] += ' ' + mid[0];
+    } else {
+      paras.push(mid.join(' '));
     }
   }
-  if (cur.length) out.push(cur.join(' '));
-  return out;
+  if (gapStart < sents.length) {
+    paras.push(sents.slice(gapStart).join(' '));
+  }
+  return paras.filter((p) => p.trim().length);
 }
 
 // Company cleanup: strip a duplicated role suffix, e.g.
