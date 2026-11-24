@@ -626,6 +626,10 @@ export interface ApplyToJobPayload {
   cv_file?: string
   /** Rendered PDF, served at /api/gate/actions/:id/cv.pdf (absent when none). */
   cv_pdf?: string
+  /** Rendered cover letter PDF, served at /api/gate/actions/:id/cover.pdf (absent when none). */
+  cover_note_pdf?: string
+  /** Source file name of the cover letter markdown the PDF was rendered from. */
+  cover_note_file?: string
   /** Internal notes for a business pitch draft (the Description slot in the gate). */
   description?: string
   /** RaziSurf pitch body (markdown) for business drafts (action_type prepare_pitch). */

@@ -59,6 +59,8 @@ services:
       - ${EYE_CV_DIR:-/home/fakhru94/eye-data/cvs}:/app/data/cvs:ro
       # RaziSurf proposal PDFs, rendered offline and served by /api/gate/actions/:id/document.pdf
       - ${EYE_PROPOSAL_DIR:-/home/fakhru94/eye-data/proposals}:/app/data/proposals:ro
+      # Cover-letter PDFs, rendered offline and served by /api/gate/actions/:id/cover.pdf
+      - ${EYE_COVER_DIR:-/home/fakhru94/eye-data/covers}:/app/data/covers:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8787/api/health').then(r => { if (!r.ok) process.exit(1) })"]

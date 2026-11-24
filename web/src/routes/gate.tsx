@@ -500,12 +500,16 @@ function GateActionRow({
   const o = action.opportunity
   const hasCv = Boolean(action.payload.cv_pdf || action.payload.cv_markdown)
   // Business pitch drafts carry a proposal instead of a CV; the two are
-  // mutually exclusive by payload, so exactly one button ever renders.
+  // mutually exclusive by payload, so exactly one document button renders.
   const hasProposal = Boolean(action.payload.proposal_pdf || action.payload.proposal_markdown)
+  // A career draft also has the letter that travels WITH the CV. It exists as
+  // soon as the cover note is drafted; the PDF is the sendable form of it.
+  const hasCover = Boolean(action.payload.cover_note_pdf || action.payload.cover_note)
   /** Decided, but the payload never carried a document to open. */
   const noDocumentOnFile = !pending && !hasCv && !hasProposal
   const [cvOpen, setCvOpen] = useState(false)
   const [proposalOpen, setProposalOpen] = useState(false)
+  const [coverOpen, setCoverOpen] = useState(false)
 
   return (
     <div className={cn('flex flex-col gap-1.5 px-4 py-3.5', !pending && 'opacity-75')}>
@@ -634,38 +638,61 @@ function GateActionRow({
             </span>
           )}
 
-          {hasCv && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setCvOpen(true)}
-              title="Open the tailored CV — view or download as PDF or Markdown"
-              className="ml-auto border-[var(--color-accent)]/40 text-[var(--color-accent)] hover:border-[var(--color-accent)]/70 hover:bg-[var(--color-accent)]/10"
-            >
-              <FileText className="size-3.5" />
-              View updated CV
-            </Button>
-          )}
+          {/* The sendable documents for this row, right-aligned as one group:
+              the CV, the letter that goes with it, and (business) the pitch. */}
+          {(hasCv || hasCover || hasProposal) && (
+            <span className="ml-auto inline-flex flex-wrap items-center justify-end gap-1.5">
+              {hasCv && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCvOpen(true)}
+                  title="Open the tailored CV — view or download as PDF or Markdown"
+                  className="border-[var(--color-accent)]/40 text-[var(--color-accent)] hover:border-[var(--color-accent)]/70 hover:bg-[var(--color-accent)]/10"
+                >
+                  <FileText className="size-3.5" />
+                  View updated CV
+                </Button>
+              )}
 
-          {hasProposal && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setProposalOpen(true)}
-              title="Open the RaziSurf proposal as a PDF"
-              className="ml-auto border-emerald-400/40 text-emerald-300 hover:border-emerald-400/70 hover:bg-emerald-400/10"
-            >
-              <FileText className="size-3.5" />
-              View proposal
-              <span className="rounded-sm bg-emerald-400/15 px-1 py-px font-mono text-[9px] tracking-wider">
-                PDF
-              </span>
-            </Button>
+              {hasCover && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCoverOpen(true)}
+                  title="Open the cover letter — download the PDF to send with the application"
+                  className="border-[var(--color-border)] text-[var(--color-text)] hover:border-[var(--color-accent)]/60 hover:bg-[var(--color-accent)]/10"
+                >
+                  <FileText className="size-3.5" />
+                  Cover letter
+                  <span className="rounded-sm bg-white/10 px-1 py-px font-mono text-[9px] tracking-wider text-[var(--color-muted)]">
+                    PDF
+                  </span>
+                </Button>
+              )}
+
+              {hasProposal && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setProposalOpen(true)}
+                  title="Open the RaziSurf proposal as a PDF"
+                  className="border-emerald-400/40 text-emerald-300 hover:border-emerald-400/70 hover:bg-emerald-400/10"
+                >
+                  <FileText className="size-3.5" />
+                  View proposal
+                  <span className="rounded-sm bg-emerald-400/15 px-1 py-px font-mono text-[9px] tracking-wider">
+                    PDF
+                  </span>
+                </Button>
+              )}
+            </span>
           )}
         </div>
       )}
 
       {cvOpen && <CvViewerDialog action={action} onClose={() => setCvOpen(false)} />}
+      {coverOpen && <CoverLetterDialog action={action} onClose={() => setCoverOpen(false)} />}
       {proposalOpen && (
         <ProposalViewerDialog action={action} onClose={() => setProposalOpen(false)} />
       )}
@@ -673,19 +700,41 @@ function GateActionRow({
   )
 }
 
-/* ─── Proposal viewer (the RaziSurf pitch behind a business draft) ──────────── */
+/* ─── Prepared-document viewer (proposal · cover letter) ───────────────────── */
+
+/** Which prepared document a row is opening. */
+type DocKind = 'proposal' | 'cover'
 
 /**
- * Same contract as the CV viewer: pdf.js renders payload.proposal_pdf from the
- * gate's own /document.pdf route (the session cookie rides along), with the
- * markdown as a readable fallback and a markdown download action. Business
- * drafts only — career drafts still get CvViewerDialog.
+ * One viewer, two documents. pdf.js renders the file the gate serves for this
+ * draft — `/document.pdf` for a RaziSurf pitch, `/cover.pdf` for an application
+ * letter — with the stored text as a readable fallback and a download action.
+ * That download is the point: the owner sends the PDF, never a screenshot of a
+ * draft, so the file a client or a hiring manager receives is always the one
+ * rendered for this action.
+ *
+ * Business drafts open the proposal; career drafts open the cover letter. The CV
+ * keeps its own dialog because it has a format toggle.
  */
-function ProposalViewerDialog({ action, onClose }: { action: GateAction; onClose: () => void }) {
-  const markdown = action.payload.proposal_markdown ?? ''
-  const pdf = action.payload.proposal_pdf ?? ''
-  const slug = action.payload.proposal_file ?? 'razisurf-proposal.md'
-  const pdfUrl = `/api/gate/actions/${action.id}/document.pdf`
+function DraftDocDialog({
+  action,
+  kind,
+  onClose,
+}: {
+  action: GateAction
+  kind: DocKind
+  onClose: () => void
+}) {
+  const isProposal = kind === 'proposal'
+  const markdown =
+    (isProposal ? action.payload.proposal_markdown : action.payload.cover_note) ?? ''
+  const pdf = (isProposal ? action.payload.proposal_pdf : action.payload.cover_note_pdf) ?? ''
+  const slug =
+    (isProposal ? action.payload.proposal_file : action.payload.cover_note_file) ??
+    (isProposal ? 'razisurf-proposal.md' : 'cover-letter.md')
+  const pdfUrl = `/api/gate/actions/${action.id}/${isProposal ? 'document.pdf' : 'cover.pdf'}`
+  const docLabel = isProposal ? 'RaziSurf proposal' : 'Cover letter'
+  const pdfName = isProposal ? action.payload.proposal_pdf ?? '' : action.payload.cover_note_pdf ?? ''
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -709,7 +758,7 @@ function ProposalViewerDialog({ action, onClose }: { action: GateAction; onClose
   const company =
     action.opportunity?.company?.name ??
     (typeof rawCompany === 'string' && rawCompany.trim() !== '' ? rawCompany : undefined) ??
-    action.summary.replace(/^Prepare pitch —\s*/, '')
+    action.summary.replace(/^(Prepare pitch|Apply to)\s*—\s*/, '')
 
   // Portalled for the same reason as CvViewerDialog: it opens from inside a
   // decided (opacity-75) row, whose stacking context otherwise traps the fixed
@@ -720,7 +769,7 @@ function ProposalViewerDialog({ action, onClose }: { action: GateAction; onClose
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label={`RaziSurf proposal for ${company}`}
+      aria-label={`${docLabel} for ${company}`}
     >
       <div
         className="flex h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl"
@@ -728,21 +777,33 @@ function ProposalViewerDialog({ action, onClose }: { action: GateAction; onClose
       >
         {/* Header */}
         <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-4 py-2.5">
-          <FileText className="size-4 text-emerald-300/90" />
+          <FileText className={isProposal ? 'size-4 text-emerald-300/90' : 'size-4 text-[var(--color-accent)]'} />
           <div className="min-w-0">
             <p className="truncate text-[13px] font-semibold text-[var(--color-text)]">
-              RaziSurf proposal — {company}
+              {docLabel} — {company}
             </p>
             <p className="font-mono text-[10px] tracking-wider text-[var(--color-muted)] uppercase">
-              Pitch document · PDF
+              {isProposal ? 'Pitch document' : 'Application letter'} · PDF
             </p>
           </div>
+          {/* The point of the viewer: the sendable file, one click away. */}
+          {pdf && (
+            <a
+              href={`${pdfUrl}?download=1`}
+              download={pdfName}
+              className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-md border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-2.5 font-mono text-[11px] text-[var(--color-accent)] transition-colors hover:border-[var(--color-accent)]/70 hover:bg-[var(--color-accent)]/20"
+              title={`Download ${pdfName || 'the PDF'} — this is the file to send`}
+            >
+              <Download className="size-3.5" strokeWidth={2} />
+              Download PDF
+            </a>
+          )}
           <Button
             size="sm"
             variant="ghost"
-            className="ml-auto"
+            className={pdf ? '' : 'ml-auto'}
             onClick={onClose}
-            aria-label="Close proposal viewer"
+            aria-label={`Close ${docLabel.toLowerCase()} viewer`}
           >
             <X className="size-4" />
           </Button>
@@ -751,29 +812,23 @@ function ProposalViewerDialog({ action, onClose }: { action: GateAction; onClose
         {/* Body — PdfViewer is a direct flex child (like the CV viewer); wrapping it
             in an overflow-hidden div squeezed its internal scroller. */}
         {pdf ? (
-          <PdfViewer url={pdfUrl} title={`RaziSurf proposal — ${company}`} />
+          <PdfViewer url={pdfUrl} title={`${docLabel} — ${company}`} />
         ) : markdown ? (
           <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
-              <MarkdownCv source={markdown} />
+            <MarkdownCv source={markdown} />
             <p className="mt-4 font-mono text-[10px] text-[var(--color-muted)]/70">
               Rendered PDF not prepared for this draft — showing the source.
             </p>
           </div>
         ) : (
           <p className="min-h-0 flex-1 p-4 text-sm italic text-[var(--color-muted)]">
-            No proposal was prepared for this draft.
+            No {isProposal ? 'proposal' : 'cover letter'} was prepared for this draft.
           </p>
         )}
 
-        {/* Footer */}
+        {/* Footer — the PDF control lives in the header, where it reads as "this
+            is the sendable file"; the footer keeps the source download and status. */}
         <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] px-4 py-2.5">
-          <a
-            href={`${pdfUrl}?download=1`}
-            className="inline-flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1 font-mono text-[11px] text-[var(--color-muted)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)]"
-          >
-            <FileText className="size-3" />
-            Download PDF
-          </a>
           {markdown && (
             <button
               type="button"
@@ -785,13 +840,23 @@ function ProposalViewerDialog({ action, onClose }: { action: GateAction; onClose
             </button>
           )}
           <span className="ml-auto font-mono text-[10px] text-[var(--color-muted)]/70">
-            READ-ONLY — APPROVE TO RECORD THE SEND
+            {isProposal ? 'READ-ONLY — APPROVE TO RECORD THE SEND' : 'READ-ONLY — NOTHING SENT FROM THE GATE'}
           </span>
         </div>
       </div>
     </div>,
     document.body,
   )
+}
+
+/** Business drafts: the RaziSurf pitch. */
+function ProposalViewerDialog({ action, onClose }: { action: GateAction; onClose: () => void }) {
+  return <DraftDocDialog action={action} kind="proposal" onClose={onClose} />
+}
+
+/** Career drafts: the letter that goes out with the tailored CV. */
+function CoverLetterDialog({ action, onClose }: { action: GateAction; onClose: () => void }) {
+  return <DraftDocDialog action={action} kind="cover" onClose={onClose} />
 }
 
 /* ─── Approve confirm (decisions are final) ─────────────────────────────────── */

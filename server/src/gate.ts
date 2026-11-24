@@ -385,23 +385,25 @@ export const gateRoute = new Hono()
   });
 
 /**
- * Document PDFs behind a draft, served from disk. Two families, one rail:
+ * Document PDFs behind a draft, served from disk. Three families, one rail:
  *
- *   • tailored CV   — payload.cv_pdf,       rendered offline into EYE_CV_DIR
- *   • pitch proposal — payload.proposal_pdf, rendered offline into EYE_PROPOSAL_DIR
+ *   • tailored CV    — payload.cv_pdf,          rendered offline into EYE_CV_DIR
+ *   • pitch proposal — payload.proposal_pdf,    rendered offline into EYE_PROPOSAL_DIR
+ *   • cover letter   — payload.cover_note_pdf,  rendered offline into EYE_COVER_DIR
  *
- * The gate only *shows* these documents — nothing is submitted from either route.
- * `/cv.pdf` stays exactly as it was (career drafts); `/document.pdf` serves
- * whichever document the draft carries, so the business "View proposal" button
- * and the career "View updated CV" button share one implementation.
+ * The gate only *shows* these documents — nothing is submitted from any route.
+ * Each route names the payload field it serves, so one helper backs all three
+ * and a draft simply 404s with an explaining envelope when it carries none.
  */
 const CV_DIR = process.env.EYE_CV_DIR ?? '/app/data/cvs';
 const PROPOSAL_DIR = process.env.EYE_PROPOSAL_DIR ?? '/app/data/proposals';
+const COVER_DIR = process.env.EYE_COVER_DIR ?? '/app/data/covers';
 
 /** Serve one prepared PDF from `dir`, or a 404 envelope explaining what is missing. */
 async function servePreparedPdf(
   c: Context,
   dir: string,
+  field: 'cv_pdf' | 'proposal_pdf' | 'cover_note_pdf',
   missingLabel: string,
 ): Promise<Response> {
   const ctx = getCtx(c);
@@ -409,8 +411,7 @@ async function servePreparedPdf(
   const action = await ctx.gate.getById(id);
   if (!action) return err(c, 404, 'NOT_FOUND', 'Gate action not found.');
 
-  const payload = action.payload as { cv_pdf?: unknown; proposal_pdf?: unknown };
-  const declaredField = dir === PROPOSAL_DIR ? payload.proposal_pdf : payload.cv_pdf;
+  const declaredField = (action.payload as Record<string, unknown>)[field];
   const declared = typeof declaredField === 'string' ? basename(declaredField) : '';
   if (declared === '' || !/^[A-Za-z0-9._-]+\.pdf$/.test(declared)) {
     return err(c, 404, 'NOT_FOUND', 'No PDF was prepared for this draft.');
@@ -434,7 +435,16 @@ async function servePreparedPdf(
   });
 }
 
-gateRoute.get('/actions/:id/cv.pdf', (c) => servePreparedPdf(c, CV_DIR, 'CV'));
+gateRoute.get('/actions/:id/cv.pdf', (c) => servePreparedPdf(c, CV_DIR, 'cv_pdf', 'CV'));
+
+/**
+ * The cover letter: the file a career draft is actually sent with. Same rail as
+ * the CV — the queue's "Cover letter" button points at this route for the PDF
+ * and falls back to payload.cover_note for the text.
+ */
+gateRoute.get('/actions/:id/cover.pdf', (c) =>
+  servePreparedPdf(c, COVER_DIR, 'cover_note_pdf', 'Cover letter'),
+);
 
 /**
  * The generalized route: serve whichever document this draft carries, proposal
@@ -443,11 +453,13 @@ gateRoute.get('/actions/:id/cv.pdf', (c) => servePreparedPdf(c, CV_DIR, 'CV'));
  */
 gateRoute.get('/actions/:id/document.pdf', async (c) => {
   const ctx = getCtx(c);
-  const action = await ctx.gate.getById(c.req.param('id'));
+  const action = await ctx.gate.getById(c.req.param('id') ?? '');
   if (!action) return err(c, 404, 'NOT_FOUND', 'Gate action not found.');
   const payload = action.payload as { cv_pdf?: unknown; proposal_pdf?: unknown };
   const hasProposal = typeof payload.proposal_pdf === 'string' && payload.proposal_pdf !== '';
-  return servePreparedPdf(c, hasProposal ? PROPOSAL_DIR : CV_DIR, hasProposal ? 'Proposal' : 'CV');
+  return hasProposal
+    ? servePreparedPdf(c, PROPOSAL_DIR, 'proposal_pdf', 'Proposal')
+    : servePreparedPdf(c, CV_DIR, 'cv_pdf', 'CV');
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
