@@ -9,7 +9,31 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import PDFDocument from 'pdfkit';
+import { createRequire } from 'node:module';
+
+// Resolve pdfkit explicitly: ESM ignores NODE_PATH for bare specifiers, so a
+// `NODE_PATH=/tmp/pdfenv/node_modules node render-cvs.mjs` invocation dies with
+// ERR_MODULE_NOT_FOUND even though the package is there. Walk the install dirs.
+const require = createRequire(import.meta.url);
+function loadPDFDocument() {
+  const candidates = [];
+  const dirs = [];
+  if (process.env.PDFKIT_DIR) dirs.push(process.env.PDFKIT_DIR);
+  dirs.push('/tmp/pdfenv/node_modules');
+  for (const d of dirs) {
+    candidates.push(path.join(d, 'pdfkit', 'js', 'pdfkit.js'));
+    candidates.push(path.join(d, 'pdfkit'));
+  }
+  candidates.push('pdfkit');
+  for (const c of candidates) {
+    try {
+      const mod = require(c);
+      return mod && mod.default ? mod.default : mod;
+    } catch (_) { /* try next */ }
+  }
+  throw new Error('pdfkit not found; set PDFKIT_DIR to its node_modules directory');
+}
+const PDFDocument = loadPDFDocument();
 
 const INK = '#14161c';
 const MUTED = '#5c6472';
@@ -19,12 +43,24 @@ const RULE = '#d5dbe4';
 const BODY = 8.9;
 
 function writeRich(doc, text, x, width, size, color) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g).filter((s) => s !== '');
+  // Bold (**x**), italic (*x*) and both (***x***) are REAL fonts here. The CV
+  // source marks employment dates as *Jan 2020 – Present*; a renderer that only
+  // strips **bold** prints those asterisks straight into the served PDF.
+  const parts = text.split(/(\*\*\*[^*]+\*\*\*|\*\*[^*]+\*\*|\*[^*]+\*)/g).filter((s) => s !== '');
   if (parts.length === 0) return;
   parts.forEach((part, idx) => {
-    const bold = part.startsWith('**') && part.endsWith('**');
-    const chunk = bold ? part.slice(2, -2) : part;
-    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(size).fillColor(color);
+    const both = part.startsWith('***') && part.endsWith('***');
+    const bold = !both && part.startsWith('**') && part.endsWith('**');
+    const italic = !both && !bold && part.startsWith('*') && part.endsWith('*') && part.length > 2;
+    const chunk = both ? part.slice(3, -3) : bold ? part.slice(2, -2) : italic ? part.slice(1, -1) : part;
+    const font = both
+      ? 'Helvetica-BoldOblique'
+      : bold
+        ? 'Helvetica-Bold'
+        : italic
+          ? 'Helvetica-Oblique'
+          : 'Helvetica';
+    doc.font(font).fontSize(size).fillColor(color);
     const options = { continued: idx < parts.length - 1, lineGap: 1.5, width };
     if (idx === 0) doc.text(chunk, x, doc.y, options);
     else doc.text(chunk, options);
