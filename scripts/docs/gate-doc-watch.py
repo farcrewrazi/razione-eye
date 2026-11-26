@@ -7,6 +7,20 @@ The Action Gate never renders at request time: a draft is a markdown source
 draft created by the hunt rail therefore starts life markdown-only, and the
 owner sees a disabled PDF tab until something renders it.
 
+Two distinct defects are reported, and they are NOT interchangeable:
+
+  cv=N     the draft has a CV source but no served PDF  -> render it
+  cover=M  the draft has a cover note but no served PDF -> render it
+  nosrc=K  a career draft has a cover note but NO `cv_markdown` at all
+           -> the dashboard cannot even draw a "View updated CV" button, and no
+              renderer can help: the payload itself must be repaired first.
+
+`nosrc` exists because the first version of this detector only looked at drafts
+whose `cv_markdown` was non-empty, so a draft queued without that key reported
+`MISSING cv=0` — the sweep certified a broken queue as complete and the owner
+found three career drafts with no CV button. Never fold the no-source class back
+into "nothing to do".
+
 This script is the detector. It is cheap and deterministic on purpose: a cron
 job uses its output as a `monitor`, so an unchanged result never wakes an agent.
 When the missing set CHANGES (a new draft arrived, or a render failed), the
@@ -52,7 +66,7 @@ def missing_file(directory, name):
 
 def main():
     items = fetch()
-    cv_batch, cover_batch, plan = [], [], []
+    cv_batch, cover_batch, nosrc_batch, plan = [], [], [], []
 
     for a in items:
         if a.get("status") != "PENDING":
@@ -65,7 +79,22 @@ def main():
 
         if a["action_type"] == "apply_to_job":
             md = p.get("cv_markdown") or ""
-            if md and missing_file(CV_DIR, p.get("cv_pdf")):
+            if not md:
+                # Career draft with no CV SOURCE. The viewer draws the CV button
+                # from this key, so the owner sees no button at all — and a
+                # renderer has nothing to render. Repair the payload, not the PDF.
+                nosrc_batch.append({
+                    "action_id": a["id"],
+                    "opportunity_id": p.get("opportunity_id"),
+                    "summary": a.get("summary", "")[:90],
+                    "company": company,
+                    "role": role,
+                    "cv_file": p.get("cv_file"),
+                    "has_cover_note": bool(p.get("cover_note")),
+                })
+                plan.append({"action_id": a["id"], "kind": "nosrc", "file": None,
+                             "summary": a.get("summary", "")[:70]})
+            elif missing_file(CV_DIR, p.get("cv_pdf")):
                 cv_file = p.get("cv_file") or f"{a['id']}.md"
                 cv_batch.append({"action_id": a["id"], "cv_file": cv_file, "markdown": md})
                 plan.append({"action_id": a["id"], "kind": "cv",
@@ -85,17 +114,19 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(WATCH_OUT, "w") as fh:
         json.dump({"cv_export": cv_batch, "cover_export": {"careers": cover_batch},
-                   "plan": plan}, fh, indent=1)
+                   "nosrc_export": nosrc_batch, "plan": plan}, fh, indent=1)
 
     n_cv = sum(1 for x in plan if x["kind"] == "cv")
     n_cover = sum(1 for x in plan if x["kind"] == "cover")
+    n_nosrc = sum(1 for x in plan if x["kind"] == "nosrc")
 
     if "--json" in sys.argv:
-        print(json.dumps({"cv": n_cv, "cover": n_cover, "plan": plan, "export": WATCH_OUT}))
+        print(json.dumps({"cv": n_cv, "cover": n_cover, "nosrc": n_nosrc,
+                          "plan": plan, "export": WATCH_OUT}))
         return
 
     # Deterministic on purpose: this line is the cron monitor. No timestamps.
-    print(f"MISSING cv={n_cv} cover={n_cover}")
+    print(f"MISSING cv={n_cv} cover={n_cover} nosrc={n_nosrc}")
     for p in plan:
         print(f"  {p['kind']:5s} {p['action_id']} {p['summary']}")
     print(f"export {WATCH_OUT}")
