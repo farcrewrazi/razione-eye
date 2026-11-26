@@ -1014,6 +1014,17 @@ function ScriptsDialog({ action, onClose }: { action: GateAction; onClose: () =>
   const [kind, setKind] = useState<ScriptKind>(available[0]?.value ?? 'email')
   const tab = SCRIPT_TABS.find((t) => t.value === kind) ?? SCRIPT_TABS[0]
   const script = ((action.payload[tab.field] as string | undefined) ?? '').trim()
+  /**
+   * A WhatsApp script opens with a `**To:** …` line naming the channel — and,
+   * where no number exists, the evidence trail ("Lesgo organiser profile").
+   * That line is owner-facing metadata: it is shown above the script but kept
+   * OUT of the copied text, because pasting it into a chat reads as a mistake.
+   */
+  const toLine =
+    tab.value === 'whatsapp' && script.startsWith('**To:**')
+      ? script.split('\n')[0].replace(/^\*\*To:\*\*\s*/, '').trim()
+      : ''
+  const body = toLine && script.includes('\n') ? script.slice(script.indexOf('\n') + 1).trim() : script
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -1030,7 +1041,7 @@ function ScriptsDialog({ action, onClose }: { action: GateAction; onClose: () =>
     action.summary.replace(/^Prepare pitch\s*—\s*/, '')
 
   const copy = (): void => {
-    const text = toPlainScript(script)
+    const text = toPlainScript(body)
     try {
       void navigator.clipboard.writeText(text).then(
         () => toast.success(`${tab.label} script copied`, { description: 'Paste it into your mail app or WhatsApp.' }),
@@ -1117,9 +1128,17 @@ function ScriptsDialog({ action, onClose }: { action: GateAction; onClose: () =>
         </div>
 
         {/* Body */}
-        {script ? (
+        {body ? (
           <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
-            <MarkdownScript source={script} />
+            {toLine && (
+              <div className="mb-3 rounded border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/[0.06] px-3 py-2">
+                <span className="font-mono text-[9px] tracking-[0.18em] text-[var(--color-muted)] uppercase">
+                  Send to
+                </span>
+                <p className="mt-0.5 text-[12.5px] break-words text-[var(--color-text)]/90">{toLine}</p>
+              </div>
+            )}
+            <MarkdownScript source={body} />
           </div>
         ) : (
           <p className="min-h-0 flex-1 p-5 text-sm italic text-[var(--color-muted)]">
@@ -1131,7 +1150,7 @@ function ScriptsDialog({ action, onClose }: { action: GateAction; onClose: () =>
 
         {/* Footer — copy is the point: the owner sends, the Gate never does. */}
         <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] px-4 py-2.5">
-          {script && (
+          {body && (
             <>
               <button
                 type="button"
