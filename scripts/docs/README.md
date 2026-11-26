@@ -86,6 +86,10 @@ Rules that keep the scripts sendable:
   open. Scope it to `action_type = prepare_pitch` and every status, never to a batch id.
 - **Scripts live in `~/eye-data/scripts/`, not the repo.** They quote real phone numbers
   and addresses and the repo is public; only the detector/writer logic is committed.
+- **The email sign-off is fixed.** Every `email_script` ends with `Regards,` / `Fakhrur Razi
+  Abdul Halim` / `Director of RaziSurf` / `https://razisurf.asia` on four separate lines, and
+  `attach-scripts.py` REJECTS an email without that exact block. A signature that drifts between
+  waves is the one defect every recipient sees.
 - **Copy strips markdown.** The panel renders markdown but the copy button emits plain
   text — pasting `**Subject:**` into Gmail is the defect this prevents.
 - **Line breaks are content here.** A CV renderer joins hard-wrapped lines; a script must

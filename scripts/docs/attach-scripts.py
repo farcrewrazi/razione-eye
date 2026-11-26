@@ -46,6 +46,16 @@ def env(key):
 
 TOKEN = env("EYE_SERVICE_TOKEN")
 
+# The one signature every email script must carry. Sending an outreach email
+# signed "RaziSurf" alone is the defect this blocks: the recipient needs a named
+# human, a role and a link, and the block must not drift between waves.
+SIGNOFF_BLOCK = (
+    "Regards,\n"
+    "Fakhrur Razi Abdul Halim\n"
+    "Director of RaziSurf\n"
+    "https://razisurf.asia"
+)
+
 
 def call(method, url, body=None):
     data = json.dumps(body).encode() if body is not None else None
@@ -71,8 +81,11 @@ def validate(patch):
             problems.append("email_script has no subject line")
         if len(email.split()) < 80:
             problems.append("email_script too short to be sendable")
-        if "razisurf" not in email.lower():
-            problems.append("email_script is not signed by RaziSurf")
+        if SIGNOFF_BLOCK not in email.replace("\r", ""):
+            problems.append(
+                "email_script must end with the canonical sign-off block: "
+                "Regards, / Fakhrur Razi Abdul Halim / Director of RaziSurf / https://razisurf.asia"
+            )
     wa = patch.get("whatsapp_script")
     if wa is not None:
         if len(wa.split()) < 40:
