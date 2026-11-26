@@ -61,3 +61,36 @@ button — but it should not survive the next sweep.
   its own block — a fused "Dear X team, I am applying…" paragraph reads as a bug.
 - **`PATCH /api/gate/actions/:id` is PENDING-only.** A decided draft that needs a new
   document field must be updated in the DB (`gate_actions.payload`), not through the API.
+
+## The outreach-script rail (email · WhatsApp · call)
+
+Every business draft (`prepare_pitch`) carries three markdown scripts in its payload —
+`email_script` (formal, sendable as-is), `whatsapp_script` (short casual-professional
+first touch) and `call_script` (bullet-point call plan). They are **payload only**: no
+file, no route, no PDF. The gate row shows a **Scripts** button beside *View proposal*
+with a `n/3` badge; the dialog toggles the three tabs and copies the selected script as
+plain text (markdown markers stripped) so it pastes straight into a mail app or WhatsApp.
+
+| script | role |
+| --- | --- |
+| `gate-script-watch.py` | detector — lists EVERY business row missing any of the three, any wave, pending or decided; writes `~/eye-data/scriptwork/pending-scripts.json` with the facts a writer may use |
+| `attach-scripts.py` | writer — validates each script (subject line, RaziSurf sign-off, length, bullets) then PATCHes pending rows and SQL-merges decided ones |
+
+    ssh fakhru94@34.143.217.207 'cd ~/razione-eye && python3 scripts/docs/gate-script-watch.py'
+    ssh fakhru94@34.143.217.207 'cd ~/razione-eye && python3 scripts/docs/attach-scripts.py ~/eye-data/scripts/manifest.json --dry-run'
+
+Rules that keep the scripts sendable:
+
+- **The detector scans the queue, not one campaign.** It was written after a wave of
+  business drafts arrived with proposals but no scripts, so the button had nothing to
+  open. Scope it to `action_type = prepare_pitch` and every status, never to a batch id.
+- **Scripts live in `~/eye-data/scripts/`, not the repo.** They quote real phone numbers
+  and addresses and the repo is public; only the detector/writer logic is committed.
+- **Copy strips markdown.** The panel renders markdown but the copy button emits plain
+  text — pasting `**Subject:**` into Gmail is the defect this prevents.
+- **Line breaks are content here.** A CV renderer joins hard-wrapped lines; a script must
+  not (the sign-off and each call-plan bullet are their own lines), so `MarkdownScript`
+  keeps one source line per rendered line.
+- **A missing script is a visible state.** The Scripts button renders on every business
+  row with `n/3`, and missing tabs are disabled with a reason — never hidden, never a
+  disabled button with no explanation.

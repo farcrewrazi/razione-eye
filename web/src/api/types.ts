@@ -638,6 +638,17 @@ export interface ApplyToJobPayload {
   proposal_file?: string
   /** Rendered proposal PDF, served at /api/gate/actions/:id/document.pdf. */
   proposal_pdf?: string
+  /**
+   * Outreach scripts for a business draft — the Scripts button beside "View
+   * proposal". All three are markdown and live only in the payload (no route,
+   * no file): the owner reads them and copies one into email/WhatsApp.
+   * `email_script` is formal and sendable as-is (subject line first),
+   * `whatsapp_script` is a short casual-professional first touch, and
+   * `call_script` is a bullet-point call plan.
+   */
+  email_script?: string
+  whatsapp_script?: string
+  call_script?: string
   [key: string]: unknown // schema is .passthrough()
 }
 

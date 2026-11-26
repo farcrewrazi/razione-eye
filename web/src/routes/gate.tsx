@@ -23,11 +23,15 @@ import {
   Ban,
   Check,
   ClipboardList,
+  Copy,
   Download,
   ExternalLink,
   FileText,
   FileWarning,
   History,
+  Mail,
+  MessageCircle,
+  Phone,
   ShieldCheck,
   StickyNote,
   X,
@@ -510,6 +514,14 @@ function GateActionRow({
   const [cvOpen, setCvOpen] = useState(false)
   const [proposalOpen, setProposalOpen] = useState(false)
   const [coverOpen, setCoverOpen] = useState(false)
+  const [scriptsOpen, setScriptsOpen] = useState(false)
+  /** Business drafts carry the outreach scripts (email / WhatsApp / call). */
+  const isPitch = action.action_type === 'prepare_pitch'
+  const scriptCount = [
+    action.payload.email_script,
+    action.payload.whatsapp_script,
+    action.payload.call_script,
+  ].filter((s) => typeof s === 'string' && s.trim() !== '').length
 
   return (
     <div className={cn('flex flex-col gap-1.5 px-4 py-3.5', !pending && 'opacity-75')}>
@@ -593,7 +605,7 @@ function GateActionRow({
       )}
 
             {/* Controls — decisions only while PENDING; the document stays viewable after. */}
-      {(pending || hasCv || hasProposal || noDocumentOnFile) && (
+      {(pending || hasCv || hasProposal || noDocumentOnFile || isPitch) && (
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           {pending && (
             <>
@@ -639,8 +651,9 @@ function GateActionRow({
           )}
 
           {/* The sendable documents for this row, right-aligned as one group:
-              the CV, the letter that goes with it, and (business) the pitch. */}
-          {(hasCv || hasCover || hasProposal) && (
+              the CV, the letter that goes with it, and (business) the pitch,
+              plus the outreach scripts that sit beside the pitch. */}
+          {(hasCv || hasCover || hasProposal || isPitch) && (
             <span className="ml-auto inline-flex flex-wrap items-center justify-end gap-1.5">
               {hasCv && (
                 <Button
@@ -686,6 +699,30 @@ function GateActionRow({
                   </span>
                 </Button>
               )}
+
+              {/* How to actually open the conversation: the three scripts that
+                  go with the pitch. Rendered for every business row, so a row
+                  still waiting for its scripts shows the gap instead of hiding
+                  the button (see ScriptsDialog for the explained empty state). */}
+              {isPitch && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setScriptsOpen(true)}
+                  title={
+                    scriptCount === 3
+                      ? 'Open the email, WhatsApp and call scripts for this prospect'
+                      : 'Outreach scripts for this prospect — some are still missing'
+                  }
+                  className="border-[var(--color-accent)]/40 text-[var(--color-accent)] hover:border-[var(--color-accent)]/70 hover:bg-[var(--color-accent)]/10"
+                >
+                  <MessageCircle className="size-3.5" />
+                  Scripts
+                  <span className="rounded-sm bg-[var(--color-accent)]/15 px-1 py-px font-mono text-[9px] tracking-wider tabular-nums">
+                    {scriptCount}/3
+                  </span>
+                </Button>
+              )}
             </span>
           )}
         </div>
@@ -696,6 +733,7 @@ function GateActionRow({
       {proposalOpen && (
         <ProposalViewerDialog action={action} onClose={() => setProposalOpen(false)} />
       )}
+      {scriptsOpen && <ScriptsDialog action={action} onClose={() => setScriptsOpen(false)} />}
     </div>
   )
 }
@@ -857,6 +895,270 @@ function ProposalViewerDialog({ action, onClose }: { action: GateAction; onClose
 /** Career drafts: the letter that goes out with the tailored CV. */
 function CoverLetterDialog({ action, onClose }: { action: GateAction; onClose: () => void }) {
   return <DraftDocDialog action={action} kind="cover" onClose={onClose} />
+}
+
+/* ─── Outreach scripts (email · WhatsApp · call) ────────────────────────────── */
+
+type ScriptKind = 'email' | 'whatsapp' | 'call'
+
+const SCRIPT_TABS: Array<{
+  value: ScriptKind
+  label: string
+  field: 'email_script' | 'whatsapp_script' | 'call_script'
+  hint: string
+  Icon: typeof Mail
+}> = [
+  { value: 'email', label: 'EMAIL', field: 'email_script', hint: 'Formal — send it as-is', Icon: Mail },
+  {
+    value: 'whatsapp',
+    label: 'WHATSAPP',
+    field: 'whatsapp_script',
+    hint: 'Casual, still professional',
+    Icon: MessageCircle,
+  },
+  { value: 'call', label: 'CALL', field: 'call_script', hint: 'Bullet points to talk through', Icon: Phone },
+]
+
+/**
+ * Script renderer. Unlike a CV, a script's line breaks ARE the message: the
+ * sign-off sits on its own line and a call plan is one bullet per step, so
+ * `MarkdownCv`'s hard-wrap joining (right for a 100-column CV) would fuse
+ * "Regards," with the name. Here one source line renders as one line.
+ */
+function MarkdownScript({ source }: { source: string }) {
+  const blocks: ReactNode[] = []
+  let bullets: string[] = []
+
+  const flushBullets = (): void => {
+    if (!bullets.length) return
+    blocks.push(
+      <ul key={`ul-${blocks.length}`} className="my-1 flex list-disc flex-col gap-1 pl-5 text-[13px] leading-6">
+        {bullets.map((b, i) => (
+          <li key={i}>{renderInline(b)}</li>
+        ))}
+      </ul>,
+    )
+    bullets = []
+  }
+
+  for (const raw of source.split('\n')) {
+    const line = raw.trimEnd()
+    const trimmed = line.trim()
+    if (/^[-*]\s+/.test(trimmed)) {
+      bullets.push(trimmed.replace(/^[-*]\s+/, ''))
+      continue
+    }
+    flushBullets()
+    if (trimmed === '') {
+      blocks.push(<div key={`sp-${blocks.length}`} className="h-2" />)
+    } else if (/^---+$/.test(trimmed)) {
+      blocks.push(<hr key={`hr-${blocks.length}`} className="my-2 border-[var(--color-border)]/60" />)
+    } else if (trimmed.startsWith('## ')) {
+      blocks.push(
+        <h3
+          key={blocks.length}
+          className="mt-3 border-b border-[var(--color-border)] pb-1 font-mono text-[10px] tracking-[0.2em] text-[var(--color-accent)] uppercase"
+        >
+          {renderInline(trimmed.slice(3))}
+        </h3>,
+      )
+    } else if (trimmed.startsWith('# ')) {
+      blocks.push(
+        <h2 key={blocks.length} className="text-sm font-semibold text-[var(--color-text)]">
+          {renderInline(trimmed.slice(2))}
+        </h2>,
+      )
+    } else {
+      blocks.push(
+        <p key={blocks.length} className="text-[13px] leading-6 text-[var(--color-text)]/90">
+          {renderInline(trimmed)}
+        </p>,
+      )
+    }
+  }
+  flushBullets()
+  return <div className="flex flex-col">{blocks}</div>
+}
+
+/**
+ * Strip the markdown so a paste lands as plain text in Gmail or WhatsApp —
+ * copying `**Subject:**` into a mail client is the failure this prevents.
+ */
+function toPlainScript(source: string): string {
+  return source
+    .split('\n')
+    .map((line) => {
+      const t = line.trimEnd()
+      const trimmed = t.trim()
+      if (/^#{1,6}\s+/.test(trimmed)) return trimmed.replace(/^#{1,6}\s+/, '').toUpperCase()
+      if (/^---+$/.test(trimmed)) return '—'
+      return t
+        .replace(/^[-*]\s+/, '• ')
+        .replace(/\*\*(.+?)\*\*/g, '$1')
+        .replace(/(^|\s)_([^_]+)_/g, '$1$2')
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+/**
+ * The owner's "what do I actually say" panel: three scripts per business draft,
+ * toggled at the top, each copy-ready. Read-only on purpose — the Action Gate
+ * never sends anything; the copy button hands the text to his own mail app or
+ * WhatsApp.
+ */
+function ScriptsDialog({ action, onClose }: { action: GateAction; onClose: () => void }) {
+  const { toast } = useToast()
+  const available = SCRIPT_TABS.filter((t) => ((action.payload[t.field] as string | undefined) ?? '').trim() !== '')
+  const [kind, setKind] = useState<ScriptKind>(available[0]?.value ?? 'email')
+  const tab = SCRIPT_TABS.find((t) => t.value === kind) ?? SCRIPT_TABS[0]
+  const script = ((action.payload[tab.field] as string | undefined) ?? '').trim()
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const rawCompany = action.opportunity?.data.company
+  const company =
+    action.opportunity?.company?.name ??
+    (typeof rawCompany === 'string' && rawCompany.trim() !== '' ? rawCompany : undefined) ??
+    action.summary.replace(/^Prepare pitch\s*—\s*/, '')
+
+  const copy = (): void => {
+    const text = toPlainScript(script)
+    try {
+      void navigator.clipboard.writeText(text).then(
+        () => toast.success(`${tab.label} script copied`, { description: 'Paste it into your mail app or WhatsApp.' }),
+        () => toast.error('Could not copy', { description: 'Select the text in the panel and copy it manually.' }),
+      )
+    } catch {
+      toast.error('Could not copy', { description: 'Select the text in the panel and copy it manually.' })
+    }
+  }
+
+  const download = (): void => {
+    const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    const blob = new Blob([script], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${slug}-${tab.value}-script.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // Portalled for the same reason as the document viewers: a decided
+  // (opacity-75) row creates a stacking context that would trap the overlay.
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Outreach scripts for ${company}`}
+    >
+      <div
+        className="flex h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-4 py-2.5">
+          <MessageCircle className="size-4 text-[var(--color-accent)]" />
+          <div className="min-w-0">
+            <p className="truncate text-[13px] font-semibold text-[var(--color-text)]">Scripts — {company}</p>
+            <p className="font-mono text-[10px] tracking-wider text-[var(--color-muted)] uppercase">
+              Email · WhatsApp · Call · {available.length}/3 ready
+            </p>
+          </div>
+          <Button size="sm" variant="ghost" className="ml-auto" onClick={onClose} aria-label="Close scripts">
+            <X className="size-4" />
+          </Button>
+        </div>
+
+        {/* Tabs — the toggle the owner asked for, at the top of the panel. */}
+        <div className="border-b border-[var(--color-border)] px-4 py-2">
+          <div
+            role="tablist"
+            aria-label="Outreach script"
+            className="inline-flex items-center gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-1"
+          >
+            {SCRIPT_TABS.map(({ value, label, field, hint, Icon }) => {
+              const has = ((action.payload[field] as string | undefined) ?? '').trim() !== ''
+              const active = kind === value
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  disabled={!has}
+                  title={has ? hint : 'No script drafted for this prospect yet.'}
+                  onClick={() => setKind(value)}
+                  className={cn(
+                    'inline-flex h-7 items-center gap-1.5 rounded-md px-3 font-mono text-[10px] tracking-wider transition-colors',
+                    'outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60',
+                    !has && 'cursor-not-allowed opacity-40',
+                    active
+                      ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                      : 'text-[var(--color-muted)] hover:bg-white/5 hover:text-[var(--color-text)]',
+                  )}
+                >
+                  <Icon className="size-3.5" />
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Body */}
+        {script ? (
+          <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+            <MarkdownScript source={script} />
+          </div>
+        ) : (
+          <p className="min-h-0 flex-1 p-5 text-sm italic text-[var(--color-muted)]">
+            No outreach scripts were drafted for this prospect yet. The Action Gate script sweep fills
+            email, WhatsApp and call scripts for every business row within 15 minutes of the draft
+            appearing.
+          </p>
+        )}
+
+        {/* Footer — copy is the point: the owner sends, the Gate never does. */}
+        <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] px-4 py-2.5">
+          {script && (
+            <>
+              <button
+                type="button"
+                onClick={copy}
+                className="inline-flex items-center gap-1.5 rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-2.5 py-1 font-mono text-[11px] text-[var(--color-accent)] transition-colors hover:border-[var(--color-accent)]/70 hover:bg-[var(--color-accent)]/20"
+              >
+                <Copy className="size-3" />
+                Copy {tab.label.toLowerCase()}
+              </button>
+              <button
+                type="button"
+                onClick={download}
+                className="inline-flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1 font-mono text-[11px] text-[var(--color-muted)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)]"
+              >
+                <Download className="size-3" />
+                .md
+              </button>
+            </>
+          )}
+          <span className="ml-auto font-mono text-[10px] text-[var(--color-muted)]/70">
+            NOTHING SENT FROM THE GATE — YOU SEND
+          </span>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
 }
 
 /* ─── Approve confirm (decisions are final) ─────────────────────────────────── */
